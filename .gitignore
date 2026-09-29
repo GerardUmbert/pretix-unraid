@@ -1,0 +1,6 @@
+# Local test data (SQLite db, media, logs) if run from this folder
+/data/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
