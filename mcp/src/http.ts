@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { loadConfigFromEnv } from "./client.js";
 import { createServer, loadToolGroupsFromEnv } from "./server.js";
 
@@ -36,17 +36,6 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
-  // One line per request (never the secret or the body) so connection
-  // problems can be diagnosed from `docker logs`.
-  const startedAt = Date.now();
-  res.on("close", () => {
-    console.log(
-      `[mcp] ${req.method} ${req.url} mcp-method=${req.headers["mcp-method"] ?? "-"} ` +
-        `proto=${req.headers["mcp-protocol-version"] ?? "-"} -> ${res.statusCode} ` +
-        `${Date.now() - startedAt}ms finished=${res.writableFinished}`,
-    );
-  });
-
   if (req.url === "/health" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
@@ -78,37 +67,16 @@ const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResp
     const bodyText = await readBody(req);
     const parsedBody = bodyText ? JSON.parse(bodyText) : undefined;
     // Stateless mode: a fresh server + transport per request, so no session
-    // state is shared between callers. Uses the SDK's web-standard transport
-    // and writes the reply ourselves: the SDK's Node adapter emits a
-    // `transfer-encoding: chunked` header with an unframed body (malformed
-    // HTTP that Claude's client rejects and that hangs behind nginx). Every
-    // reply here is a single JSON document, so send it with Content-Length.
+    // state is shared between callers (the SDK forbids reusing a stateless
+    // transport across requests).
     const mcpServer = createServer(config, groups);
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      void transport.close();
+      void mcpServer.close();
     });
     await mcpServer.connect(transport);
-    const headers = new Headers();
-    for (const [name, value] of Object.entries(req.headers)) {
-      if (typeof value === "string") headers.set(name, value);
-    }
-    const webRequest = new Request(`http://${req.headers.host ?? "localhost"}${req.url}`, {
-      method: "POST",
-      headers,
-      body: bodyText,
-    });
-    const webResponse = await transport.handleRequest(webRequest, { parsedBody });
-    const payload = Buffer.from(await webResponse.arrayBuffer());
-    const outHeaders: Record<string, string> = {};
-    webResponse.headers.forEach((value, name) => {
-      if (name.toLowerCase() !== "transfer-encoding") outHeaders[name] = value;
-    });
-    outHeaders["content-length"] = String(payload.length);
-    res.writeHead(webResponse.status, outHeaders);
-    res.end(payload);
-    void transport.close();
-    void mcpServer.close();
+    await transport.handleRequest(req, res, parsedBody);
   } catch (err) {
     console.error("Error handling MCP request:", err);
     if (!res.headersSent) {
