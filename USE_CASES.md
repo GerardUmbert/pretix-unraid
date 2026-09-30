@@ -66,14 +66,54 @@ reissue. These are thin wrappers around pretix's own
 `mark_paid`/`mark_canceled` order actions — no extra logic beyond
 previewing the order's current state first.
 
-## What's deliberately NOT covered
+## Flow 4: transferring a ticket to someone else
 
-Vouchers, memberships, gift cards, webhooks, item/catalog management,
-event creation, bulk operations — none of this is in scope. See
-`plans/mcp-server.md`'s "Why / actual use cases" section for the reasoning:
-the tool is scoped to ticket lookup and reissue, not general pretix
-administration. If a real need for more comes up, that's a deliberate,
-separate expansion — not something to guess at ahead of time.
+**Ask**: "Transfer the ticket on order ABC12 to Ana Ruiz, ana@example.com."
+
+**Tool**: `pretix_transfer_ticket`
+
+Changes the attendee name/email on one ticket, optionally the order's
+contact email, and by default reissues the QR so the previous holder's
+copy stops working. Preview first with `confirm: false`. A ticket cannot
+be moved to a different order through pretix's API; the order stays with
+the original buyer.
+
+## How this fits with the real integration
+
+The MCP is a **backoffice helper**: it lets staff trace ticket flow and
+history and set things up quickly (events, items, quotas, check-in lists,
+test orders). It is not the production path. A custom app is expected to
+talk to pretix's REST API directly: send in orders, get back tickets
+(secrets/QR values and ids), and request changes such as transfers.
+
+- **Customer accounts are not needed.** Orders carry their own buyer
+  email and per-ticket attendee name/email, and transfers work on those.
+  The customer tools (`pretix_create_customer`, `pretix_update_customer`,
+  `customer_id` on order creation) exist, but nothing here depends on
+  them; skip them unless a shop-with-logins setup is wanted.
+- **Change notifications come from pretix, not the MCP.** Because any
+  client (the MCP or the custom app) can make a change, the webhook is
+  pretix's own. Verified against a real instance: a holder change logs
+  `pretix.event.order.modified`, a QR reissue logs
+  `pretix.event.order.changed.secret` (subscribe with the wildcard
+  `pretix.event.order.changed.*`), and an order-email change logs
+  `pretix.event.order.contact.changed`. Subscribe a webhook to those (plus
+  `pretix.event.order.placed`/`.paid` if useful).
+- **Webhook targets must be publicly routable.** pretix refuses to call
+  private, loopback, link-local and CGNAT (100.64.0.0/10, so Tailscale
+  IPs too) addresses (`pretix/helpers/ssrf.py`, no config switch). A
+  receiver on a LAN IP or a Tailscale address will fail with "Request to
+  private address ... blocked". Use a public hostname (e.g. a Funnel URL).
+- **Payment providers can't be enabled via the API**, only in the web UI.
+  Orders created through the API as paid need none; only a shop that sells
+  paid tickets directly needs one to go live.
+
+## Scope
+
+Beyond ticket lookup and reissue, the MCP now also covers events,
+items/categories/quotas, check-in lists, orders, vouchers, customers,
+webhooks and devices (see `mcp/README.md`). It still does not manage
+payment providers, backend users/teams, or invoices.
 
 ## Developing / testing this locally
 

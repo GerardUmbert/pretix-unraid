@@ -34,6 +34,15 @@ if the Funnel is on, so that secret is the only protection then — keep it
 long and out of chats/repos. The stdio entry point still works via
 `docker exec -i pretix node /opt/pretix-mcp/dist/index.js`.
 
+Intended use: the MCP is a backoffice helper (trace ticket flow/history,
+fast setup); a separate custom app is expected to call pretix's API
+directly for orders, tickets/QRs and transfers. **Customer accounts are
+not needed** for that flow (orders carry buyer email and per-ticket
+attendee details; transfers use `pretix_transfer_ticket`). Change
+webhooks must come from pretix itself, never from the MCP, since other
+clients make changes too; pretix blocks webhook targets on
+private/CGNAT/Tailscale addresses. Details in `USE_CASES.md`.
+
 Gotchas: pretix rejects requests whose Host header is not its configured
 URL, and Node's `fetch` silently ignores a custom `Host` header. So
 inside the container the MCP calls `http://127.0.0.1:8345` with
