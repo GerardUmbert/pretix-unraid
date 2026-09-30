@@ -322,6 +322,16 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       wrap(crm.getCustomer, client),
     );
     server.registerTool(
+      "pretix_create_customer",
+      { description: "Create a customer (shop buyer) account. Orders can be linked to it via pretix_create_order's customer_id. Call with confirm=false first to preview.", inputSchema: crm.createCustomerInputSchema },
+      wrap(crm.createCustomer, client),
+    );
+    server.registerTool(
+      "pretix_update_customer",
+      { description: "Update a customer's email, name, phone, or enable/disable the account. Call with confirm=false first to preview.", inputSchema: crm.updateCustomerInputSchema },
+      wrap(crm.updateCustomer, client),
+    );
+    server.registerTool(
       "pretix_list_memberships",
       { description: "List memberships for a customer.", inputSchema: crm.listMembershipsInputSchema },
       wrap(crm.listMemberships, client),

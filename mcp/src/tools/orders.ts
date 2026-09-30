@@ -53,6 +53,10 @@ export const createOrderInputSchema = {
   status: z
     .enum(["n", "p"])
     .describe("Initial order status: n=pending, p=paid (skips the pending step)."),
+  customer_id: z
+    .string()
+    .optional()
+    .describe("Customer account identifier (from pretix_create_customer / pretix_list_customers) to link this order to."),
   send_email: z
     .boolean()
     .describe("Whether pretix should email the customer about this order. Must be set explicitly — wrong value can double-notify a real attendee if the order was already communicated elsewhere."),
@@ -62,6 +66,7 @@ export const createOrderInputSchema = {
         item: z.number().int().describe("Item (product) ID."),
         price: z.string().describe("Price for this position, e.g. '10.00'."),
         attendee_name: z.string().optional().describe("Attendee name for this position."),
+        attendee_email: z.string().optional().describe("Attendee email for this position."),
         secret: z
           .string()
           .optional()
@@ -299,7 +304,8 @@ export async function createOrder(
     email: string;
     status: "n" | "p";
     send_email: boolean;
-    positions: Array<{ item: number; price: string; attendee_name?: string; secret?: string }>;
+    positions: Array<{ item: number; price: string; attendee_name?: string; attendee_email?: string; secret?: string }>;
+    customer_id?: string;
     code?: string;
     confirm: boolean;
   },
@@ -312,6 +318,7 @@ export async function createOrder(
     status: input.status,
     position_count: input.positions.length,
     positions: input.positions,
+    customer_id: input.customer_id ?? null,
     code: input.code ?? "(auto-generated)",
   };
 
@@ -331,6 +338,7 @@ export async function createOrder(
     status: input.status,
     payment_provider: "manual",
     invoice_address: {},
+    customer: input.customer_id ?? null,
     send_email: input.send_email,
     code: input.code,
     positions: input.positions,
