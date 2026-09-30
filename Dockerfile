@@ -29,13 +29,25 @@ USER root
 COPY docker-entrypoint-plugins.sh /usr/local/bin/docker-entrypoint-plugins.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint-plugins.sh
 
-# pretix MCP server, run on demand over stdio with
-#   docker exec -i pretix node /opt/pretix-mcp/dist/index.js
-# (base image already ships Node). It is not a long-running service and
-# opens no port; it only needs the PRETIX_* env vars set on the container.
+# Bundled pretix MCP server (base image already ships Node). Two ways in:
+#   - HTTP: supervised on 127.0.0.1:3000 and exposed by nginx at /mcp, only
+#     when PRETIX_MCP_TOKEN (bearer secret), PRETIX_API_TOKEN and
+#     PRETIX_ORGANIZER are all set; the node process rejects requests
+#     without the secret.
+#   - stdio: docker exec -i pretix node /opt/pretix-mcp/dist/index.js
 COPY --from=mcp-build /mcp/dist /opt/pretix-mcp/dist
 COPY --from=mcp-build /mcp/node_modules /opt/pretix-mcp/node_modules
 COPY mcp/package.json /opt/pretix-mcp/package.json
+COPY pretix-mcp-http.sh /usr/local/bin/pretix-mcp-http.sh
+COPY supervisord-mcp.conf /etc/supervisord/pretixmcp.conf
+COPY nginx-mcp-location.conf /tmp/nginx-mcp-location.conf
+RUN chmod +x /usr/local/bin/pretix-mcp-http.sh \
+ && sed -i 's#pretixweb.conf#pretixweb.conf /etc/supervisord/pretixmcp.conf#' /etc/supervisord.web.conf \
+ && awk '/^        location \/ \{/ && !done { while ((getline line < "/tmp/nginx-mcp-location.conf") > 0) print line; done=1 } { print }' /etc/nginx/nginx.conf > /tmp/nginx.conf.new \
+ && mv /tmp/nginx.conf.new /etc/nginx/nginx.conf \
+ && rm /tmp/nginx-mcp-location.conf \
+ && grep -q 'location = /mcp' /etc/nginx/nginx.conf \
+ && grep -q pretixmcp.conf /etc/supervisord.web.conf
 
 # nginx listens on 8345 instead of 80 so the container port equals the host
 # port in the Unraid template. Unraid's Tailscale Serve/Funnel hook proxies

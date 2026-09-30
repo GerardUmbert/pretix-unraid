@@ -114,14 +114,23 @@ billing internals, no organizer-level plugin management.
 ## Bundled in the pretix container
 
 The Unraid image built from this repo already contains a compiled copy of
-this server at `/opt/pretix-mcp`, so nothing needs building or installing
-on your PC. Set `MCP API Token` (a team API key; the key needs a name) and
-`MCP Organizer` in the container's template settings, then point your MCP
-client at the container, e.g. over SSH:
+this server, served at `/mcp` on the same address as pretix itself, so
+nothing needs building or installing on your PC. In the container's
+template settings set:
+
+- `MCP Access Secret` (`PRETIX_MCP_TOKEN`): a long random secret (24+
+  characters) that clients must send as a Bearer token.
+- `MCP API Token` (`PRETIX_API_TOKEN`): a team API key from pretix (the
+  key needs a name).
+- `MCP Organizer` (`PRETIX_ORGANIZER`): the organizer's short form.
+
+Then add it to Claude Code (keep `--scope user` so the secret does not
+end up in a repo):
 
 ```sh
-claude mcp add pretix --scope user -- ssh root@<nas-ip> docker exec -i pretix node /opt/pretix-mcp/dist/index.js
+claude mcp add --transport http pretix --scope user https://<your-pretix-url>/mcp --header "Authorization: Bearer <secret>"
 ```
 
-`PRETIX_BASE_URL` defaults to the container's Public URL. Keep `--scope
-user` so no config containing the NAS address ends up in a repo.
+Without all three variables the endpoint is not started. If pretix is
+exposed to the internet (e.g. a Tailscale Funnel), `/mcp` is too, and the
+secret is the only protection.

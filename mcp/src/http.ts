@@ -1,22 +1,30 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { loadConfigFromEnv } from "./client.js";
 import { createServer, loadToolGroupsFromEnv } from "./server.js";
 
+// Streamable HTTP transport, meant to sit behind the container's nginx at
+// /mcp. It holds a pretix API token, so it refuses to start without a
+// bearer secret and only listens on localhost - nginx is the only way in.
 const config = loadConfigFromEnv();
-const port = Number(process.env.PRETIX_MCP_PORT ?? "3000");
-
-// Stateless mode: no session ID tracking, every request is independent.
-// This matches how this server is actually used - a long-running
-// single-tenant service with no per-client session state to maintain,
-// not a multi-client stateful protocol negotiation.
-const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined,
-});
-
 const groups = loadToolGroupsFromEnv();
-const mcpServer = createServer(config, groups);
-await mcpServer.connect(transport);
+const port = Number(process.env.PRETIX_MCP_PORT ?? "3000");
+const host = process.env.PRETIX_MCP_HOST ?? "127.0.0.1";
+
+const secret = process.env.PRETIX_MCP_TOKEN;
+if (!secret || secret.length < 24) {
+  console.error("PRETIX_MCP_TOKEN must be set to a secret of at least 24 characters");
+  process.exit(1);
+}
+const expectedDigest = createHash("sha256").update(`Bearer ${secret}`).digest();
+
+function isAuthorized(req: IncomingMessage): boolean {
+  const provided = createHash("sha256")
+    .update(req.headers.authorization ?? "")
+    .digest();
+  return timingSafeEqual(provided, expectedDigest);
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -39,9 +47,25 @@ const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResp
     return;
   }
 
+  if (!isAuthorized(req)) {
+    res.writeHead(401, { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" });
+    res.end(JSON.stringify({ error: "Unauthorized" }));
+    return;
+  }
+
   try {
     const bodyText = await readBody(req);
     const parsedBody = bodyText ? JSON.parse(bodyText) : undefined;
+    // Stateless mode: a fresh server + transport per request, so no session
+    // state is shared between callers (the SDK forbids reusing a stateless
+    // transport across requests).
+    const mcpServer = createServer(config, groups);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      void transport.close();
+      void mcpServer.close();
+    });
+    await mcpServer.connect(transport);
     await transport.handleRequest(req, res, parsedBody);
   } catch (err) {
     console.error("Error handling MCP request:", err);
@@ -52,8 +76,6 @@ const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResp
   }
 });
 
-httpServer.listen(port, () => {
-  console.log(`pretix-mcp HTTP server listening on port ${port}`);
-  console.log(`  MCP endpoint:    http://0.0.0.0:${port}/mcp`);
-  console.log(`  Health check:    http://0.0.0.0:${port}/health`);
+httpServer.listen(port, host, () => {
+  console.log(`pretix-mcp HTTP server listening on ${host}:${port} (endpoint /mcp, bearer auth required)`);
 });

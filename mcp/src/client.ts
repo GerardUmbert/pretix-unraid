@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+
 export class PretixApiError extends Error {
   constructor(
     public status: number,
@@ -12,20 +14,79 @@ export interface PretixConfig {
   token: string;
   organizer: string;
   event?: string;
+  // Set when talking to pretix over an internal address (see loadConfigFromEnv):
+  // pretix rejects requests whose Host is not its configured public URL.
+  hostHeader?: string;
+  forwardedProto?: string;
 }
 
 export function loadConfigFromEnv(): PretixConfig {
-  // Falls back to the container's own public URL so the bundled copy needs no extra setting.
-  const baseUrl = process.env.PRETIX_BASE_URL ?? process.env.PRETIX_PRETIX_URL;
+  const explicitBaseUrl = process.env.PRETIX_BASE_URL;
   const token = process.env.PRETIX_API_TOKEN;
   const organizer = process.env.PRETIX_ORGANIZER;
   const event = process.env.PRETIX_EVENT;
 
-  if (!baseUrl) throw new Error("PRETIX_BASE_URL is not set");
+  const publicUrl = process.env.PRETIX_PRETIX_URL;
+  if (!explicitBaseUrl && !publicUrl) throw new Error("PRETIX_BASE_URL is not set");
   if (!token) throw new Error("PRETIX_API_TOKEN is not set");
   if (!organizer) throw new Error("PRETIX_ORGANIZER is not set");
 
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), token, organizer, event };
+  if (explicitBaseUrl) {
+    return { baseUrl: explicitBaseUrl.replace(/\/+$/, ""), token, organizer, event };
+  }
+
+  // Running inside the pretix container (PRETIX_PRETIX_URL is pretix's own
+  // config): call pretix locally instead of through the public URL, but
+  // present the public host so its host check passes.
+  const pub = new URL(publicUrl!);
+  return {
+    baseUrl: (process.env.PRETIX_INTERNAL_URL ?? "http://127.0.0.1:8345").replace(/\/+$/, ""),
+    token,
+    organizer,
+    event,
+    hostHeader: pub.host,
+    forwardedProto: pub.protocol.replace(":", ""),
+  };
+}
+
+interface SimpleResponse {
+  ok: boolean;
+  status: number;
+  text: string;
+}
+
+async function fetchAsSimpleResponse(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body?: string,
+): Promise<SimpleResponse> {
+  const res = await fetch(url, { method, headers, body });
+  return { ok: res.ok, status: res.status, text: await res.text() };
+}
+
+// Node's fetch silently ignores a custom Host header, which pretix needs when
+// this runs inside its container (see loadConfigFromEnv), so use node:http.
+function requestWithHostHeader(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body?: string,
+): Promise<SimpleResponse> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(url, { method, headers }, (res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => (text += chunk));
+      res.on("end", () => {
+        const status = res.statusCode ?? 0;
+        resolve({ ok: status >= 200 && status < 300, status, text });
+      });
+    });
+    req.on("error", reject);
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
 }
 
 export class PretixClient {
@@ -36,17 +97,18 @@ export class PretixClient {
   }
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(this.url(path), {
-      method,
-      headers: {
-        Authorization: `Token ${this.config.token}`,
-        "Content-Type": "application/json",
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const headers: Record<string, string> = {
+      Authorization: `Token ${this.config.token}`,
+      "Content-Type": "application/json",
+      ...(this.config.forwardedProto ? { "X-Forwarded-Proto": this.config.forwardedProto } : {}),
+    };
+    const payload = body === undefined ? undefined : JSON.stringify(body);
 
-    const text = await res.text();
-    const data = text ? JSON.parse(text) : undefined;
+    const res = this.config.hostHeader
+      ? await requestWithHostHeader(this.url(path), method, { ...headers, Host: this.config.hostHeader }, payload)
+      : await fetchAsSimpleResponse(this.url(path), method, headers, payload);
+
+    const data = res.text ? JSON.parse(res.text) : undefined;
 
     if (!res.ok) {
       throw new PretixApiError(res.status, data);

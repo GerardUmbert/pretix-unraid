@@ -19,21 +19,28 @@ Two things, deliberately kept in one repo:
    two separate repos.
 
 **Important distinction**: the MCP server is *shipped inside* the custom
-pretix image (the user explicitly asked for this) at `/opt/pretix-mcp`,
-built by a Node build stage in the `Dockerfile` and run on demand with
-`docker exec -i pretix node /opt/pretix-mcp/dist/index.js`. It is NOT a
-long-running service and opens no port: it still speaks stdio, so the
-AI client on the user's PC reaches it by running that command (e.g. over
-`ssh <nas> docker exec -i ...`). Do not add a network transport or
-publish a port for it without asking — that would put a token-holding
-API in front of the NAS. It reads its config from container env vars
-(`PRETIX_API_TOKEN`, `PRETIX_ORGANIZER`, `PRETIX_TOOL_GROUPS`, set in the
-Unraid template; the token field is masked and lives only in the NAS's
-container settings). `PRETIX_BASE_URL` defaults to `PRETIX_PRETIX_URL`
-because pretix rejects requests whose Host header is not its configured
-URL, so `localhost` will not work from inside the container. For local
-development, `mcp/` can still be run directly with `npm run build` +
-`node mcp/dist/index.js` against a local throwaway instance.
+pretix image (the user explicitly asked for this, and for it to be
+reachable by URL like their Subtitlarr MCP, not over SSH). A Node build
+stage in the `Dockerfile` compiles `mcp/` into `/opt/pretix-mcp`. Its HTTP
+transport (`mcp/src/http.ts`) runs under supervisord on 127.0.0.1:3000
+and nginx exposes it at `/mcp` on the same address/port as the pretix UI
+(`nginx-mcp-location.conf`, `supervisord-mcp.conf`, `pretix-mcp-http.sh`).
+It only starts when `PRETIX_MCP_TOKEN` (bearer secret, >= 24 chars),
+`PRETIX_API_TOKEN` and `PRETIX_ORGANIZER` are all set in the container
+(Unraid template fields; the secret and token are masked and live only
+in the NAS's container settings). Every request to `/mcp` needs
+`Authorization: Bearer <PRETIX_MCP_TOKEN>`; it is exposed by the Funnel
+if the Funnel is on, so that secret is the only protection then — keep it
+long and out of chats/repos. The stdio entry point still works via
+`docker exec -i pretix node /opt/pretix-mcp/dist/index.js`.
+
+Gotchas: pretix rejects requests whose Host header is not its configured
+URL, and Node's `fetch` silently ignores a custom `Host` header. So
+inside the container the MCP calls `http://127.0.0.1:8345` with
+`node:http` and sets `Host` to the host of `PRETIX_PRETIX_URL` (see
+`mcp/src/client.ts`); set `PRETIX_BASE_URL` to bypass this and use a
+plain URL (e.g. for local development: `npm run build` +
+`node mcp/dist/index.js` against a local throwaway instance).
 
 The pretix template/container side is explicitly NOT a production
 setup:

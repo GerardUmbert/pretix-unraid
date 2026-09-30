@@ -9,6 +9,9 @@ on:
       - Dockerfile
       - docker-entrypoint-plugins.sh
       - mcp/**
+      - pretix-mcp-http.sh
+      - supervisord-mcp.conf
+      - nginx-mcp-location.conf
       - .github/workflows/build-image.yml
   workflow_dispatch: {}
 
