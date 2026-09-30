@@ -5,12 +5,18 @@ ticketing software — for **local testing only**. There is no official
 Community Applications template for pretix, so this is a manually
 installed template XML.
 
-This uses pretix's own official `pretix/standalone:stable` image
-unmodified, configured with SQLite instead of Postgres and no Redis/Celery
+This builds on top of pretix's own official `pretix/standalone:stable`
+image, configured with SQLite instead of Postgres and no Redis/Celery
 broker (pretix falls back to running background tasks inline when no
 `[celery]`/`[redis]` section is present). No extra containers, no ports
 beyond the web UI are exposed — nothing here touches other services
 (Postgres, Redis, etc.) already running on the NAS.
+
+On top of the stock image, this repo adds a thin `Dockerfile` +
+`docker-entrypoint-plugins.sh` that can install extra pretix plugins
+(pip packages) at container start via the `PRETIX_PLUGINS` env var —
+see "Installing extra plugins" below. With `PRETIX_PLUGINS` unset, the
+container behaves identically to the stock image.
 
 **Not meant for production or long-term data.** For a real deployment,
 follow pretix's official [self-hosting docs](https://docs.pretix.eu/self-hosting/),
@@ -18,8 +24,57 @@ which use the supported docker-compose stack (Postgres + Redis + pretix).
 
 ## Files
 
+- `Dockerfile` — builds the custom image on top of `pretix/standalone:stable`.
+- `docker-entrypoint-plugins.sh` — first-boot plugin installer, see below.
+- `.github/workflows/build-image.yml` — GitHub Actions workflow that
+  builds this Dockerfile and pushes it to GHCR (GitHub Container
+  Registry) on every push to `master` that touches the Dockerfile or
+  entrypoint script.
 - `pretix-standalone.xml` — Unraid Docker template.
 - `pretix.cfg` — pretix config file, mounted read-only into the container.
+
+## Building and publishing the image
+
+Unraid pulls images by name from a registry — it can't run `docker build`
+itself. This repo's image is built and published via GitHub Actions:
+
+1. Push this repo to GitHub (if not already).
+2. The workflow in `.github/workflows/build-image.yml` runs automatically
+   on push to `master`, building and pushing to
+   `ghcr.io/<your-github-username>/pretix-custom:latest`.
+3. First time only: on GitHub, go to the pushed package's settings (under
+   your profile → Packages → pretix-custom) and make sure its visibility
+   matches what you want (public, or private + linked to this repo so
+   your NAS can pull it — private GHCR packages need a PAT for `docker
+   login` on the Unraid side).
+4. Edit `pretix-standalone.xml`'s `<Repository>` (and `<Registry>`) to
+   replace `REPLACE_WITH_GITHUB_USERNAME` with your actual GitHub
+   username before installing the template on Unraid.
+
+You can also build and run it fully locally without any registry, e.g.
+for testing changes to the Dockerfile before pushing:
+
+```sh
+docker build -t pretix-custom:local .
+docker run -d --name pretix-test \
+  -v pretix_test_data:/data \
+  -v "$(pwd)/pretix.cfg:/etc/pretix/pretix.cfg:ro" \
+  -p 18345:80 \
+  pretix-custom:local
+```
+
+## Installing extra plugins
+
+Set the `PRETIX_PLUGINS` environment variable to a comma-separated list
+of pip package names, e.g. `pretix-passbook,pretix-someplugin`. On
+container start, `docker-entrypoint-plugins.sh` installs each one, runs
+migrations, and rebuilds static assets before pretix itself starts.
+Leave it unset (default) to run the stock feature set with no extra
+install step.
+
+To change the plugin list later: edit the `Extra Plugins` field in the
+Unraid template and restart the container — no image rebuild needed,
+since the install happens at container start, not build time.
 
 ## How to run (Unraid)
 
@@ -34,7 +89,8 @@ which use the supported docker-compose stack (Postgres + Redis + pretix).
 3. Docker tab → Add Container → select the **pretix** template.
    Check the web UI port (default `8345`) doesn't collide with anything
    else, then Apply.
-4. First boot runs database migrations (~30-60s). Once up, the UI is at:
+4. First boot runs database migrations (~30-60s), plus plugin install if
+   `PRETIX_PLUGINS` is set. Once up, the UI is at:
    ```
    http://<nas-ip>:8345/control/
    ```
@@ -47,11 +103,12 @@ which use the supported docker-compose stack (Postgres + Redis + pretix).
 
 ```sh
 mkdir -p ./data
+docker build -t pretix-custom:local .
 docker run -d --name pretix \
   -v "$(pwd)/data:/data" \
   -v "$(pwd)/pretix.cfg:/etc/pretix/pretix.cfg:ro" \
   -p 8345:80 \
-  pretix/standalone:stable all
+  pretix-custom:local
 ```
 
 Then visit `http://localhost:8345/control/` and create a superuser the

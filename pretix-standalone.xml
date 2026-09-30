@@ -1,15 +1,15 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>pretix</Name>
-  <Repository>pretix/standalone:stable</Repository>
-  <Registry>https://hub.docker.com/r/pretix/standalone/</Registry>
+  <Repository>ghcr.io/REPLACE_WITH_GITHUB_USERNAME/pretix-custom:latest</Repository>
+  <Registry>https://github.com/REPLACE_WITH_GITHUB_USERNAME/pretix-unraid/pkgs/container/pretix-custom</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
   <Support>https://docs.pretix.eu/self-hosting/</Support>
   <Project>https://pretix.eu/</Project>
-  <Overview>Throwaway test instance of pretix (event ticketing) using its official standalone image with a built-in SQLite database - no Postgres/Redis containers involved, nothing touches ports used by other services on this NAS. Not intended for production or long-term data: for real use, follow pretix's official docker-compose stack with Postgres+Redis instead.</Overview>
+  <Overview>Throwaway test instance of pretix (event ticketing), built from the official standalone image plus a first-boot plugin installer (see PRETIX_PLUGINS), with a built-in SQLite database - no Postgres/Redis containers involved, nothing touches ports used by other services on this NAS. Not intended for production or long-term data: for real use, follow pretix's official docker-compose stack with Postgres+Redis instead. Image is custom-built via GitHub Actions from this repo's Dockerfile, not pulled from pretix/standalone directly - update the Repository field above with your actual GitHub username/registry path.</Overview>
   <Category>Productivity:</Category>
   <WebUI>http://[IP]:[PORT:8345]/control/</WebUI>
   <TemplateURL/>
@@ -22,4 +22,5 @@
   <Config Name="Web UI Port" Target="80" Default="8345" Mode="tcp" Description="Host port for the pretix web UI. Only this port is exposed to the host - no internal Postgres/Redis ports are published, so this cannot collide with existing Postgres/Redis instances on this NAS." Type="Port" Display="always" Required="true" Mask="false">8345</Config>
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/pretix/data" Mode="rw" Description="Persistent data: SQLite database, uploaded media, logs. Delete this folder to fully reset the test instance." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/pretix/data</Config>
   <Config Name="Config File" Target="/etc/pretix/pretix.cfg" Default="/mnt/user/appdata/pretix/pretix.cfg" Mode="ro" Description="pretix.cfg file (SQLite backend, no external DB/Redis). Create this file on the host before starting the container - see the pretix.cfg content provided alongside this template." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/pretix/pretix.cfg</Config>
+  <Config Name="Extra Plugins" Target="PRETIX_PLUGINS" Default="" Mode="" Description="Comma-separated pip package names of extra pretix plugins to install on container start, e.g. pretix-passbook. Leave empty to install nothing extra. Changing this and restarting the container re-runs the installer - no image rebuild needed." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 </Container>
