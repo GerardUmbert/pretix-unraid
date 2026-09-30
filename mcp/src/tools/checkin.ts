@@ -30,12 +30,57 @@ export const checkinBySecretInputSchema = {
   type: z.enum(["entry", "exit"]).default("entry").describe("Whether this is an entry or exit scan."),
 };
 
+export const createCheckinListInputSchema = {
+  organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
+  event: z.string().describe("Event slug."),
+  name: z.string().describe("Check-in list name, e.g. 'Main entrance'."),
+  all_products: z.boolean().default(true).describe("Whether the list accepts every product, or only limit_item_ids."),
+  limit_item_ids: z.array(z.number().int()).optional().describe("Item IDs this list accepts, if all_products is false."),
+  confirm: z
+    .boolean()
+    .describe("Must be explicitly set to true to actually create the check-in list. Call once with confirm=false to preview first."),
+};
+
 interface PretixCheckinList {
   id: number;
   name: string;
   all_products: boolean;
   checkin_count: number;
   position_count: number;
+}
+
+export async function createCheckinList(
+  client: PretixClient,
+  input: {
+    organizer?: string;
+    event: string;
+    name: string;
+    all_products: boolean;
+    limit_item_ids?: number[];
+    confirm: boolean;
+  },
+) {
+  const organizer = client.organizer(input.organizer);
+
+  const body = {
+    name: input.name,
+    all_products: input.all_products,
+    limit_products: input.limit_item_ids ?? [],
+  };
+
+  if (!input.confirm) {
+    return {
+      performed: false,
+      message: "Dry run — no check-in list created. Re-call with confirm=true to actually create it.",
+      would_create: body,
+    };
+  }
+
+  const created = await client.post<PretixCheckinList>(
+    `/organizers/${organizer}/events/${input.event}/checkinlists/`,
+    body,
+  );
+  return { performed: true, list_id: created.id, name: created.name };
 }
 
 export async function listCheckinLists(

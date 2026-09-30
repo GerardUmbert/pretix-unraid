@@ -98,7 +98,7 @@ This repo has a throwaway pretix test instance (SQLite-backed,
 disposable) plus repo-local skills for resetting and seeding it with
 test data — see `../.claude/skills/` and `../AGENTS.md`. Point
 `PRETIX_BASE_URL` at that instance to develop against real data without
-touching a production pretix. All 49 tools have been driven over real
+touching a production pretix. All 49 original tools have been driven over real
 MCP stdio JSON-RPC against that instance, including real (non-dry-run)
 mutations — see `../plans/mcp-server.md` for what's been verified vs.
 what still needs testing (multi-position orders, the `crm` group's

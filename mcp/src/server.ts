@@ -168,6 +168,11 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       wrap(checkin.listCheckinLists, client),
     );
     server.registerTool(
+      "pretix_create_checkin_list",
+      { description: "Create a check-in list for an event. Call with confirm=false first to preview.", inputSchema: checkin.createCheckinListInputSchema },
+      wrap(checkin.createCheckinList, client),
+    );
+    server.registerTool(
       "pretix_get_checkin_status",
       { description: "Get check-in counts (checked in, total, currently inside) for a check-in list.", inputSchema: checkin.getCheckinStatusInputSchema },
       wrap(checkin.getCheckinStatus, client),
@@ -194,6 +199,16 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       "pretix_get_event",
       { description: "Get details of one event.", inputSchema: core.getEventInputSchema },
       wrap(core.getEvent, client),
+    );
+    server.registerTool(
+      "pretix_create_event",
+      { description: "Create a new event. It always starts offline (not live); use pretix_update_event to go live once it has a quota. Call with confirm=false first to preview.", inputSchema: core.createEventInputSchema },
+      wrap(core.createEvent, client),
+    );
+    server.registerTool(
+      "pretix_update_event",
+      { description: "Update an event's name, dates, location, test mode, or take it live/offline. Call with confirm=false first to preview.", inputSchema: core.updateEventInputSchema },
+      wrap(core.updateEvent, client),
     );
     server.registerTool(
       "pretix_list_items",

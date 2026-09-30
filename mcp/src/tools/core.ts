@@ -10,6 +10,41 @@ export const getEventInputSchema = {
   event: z.string().describe("Event slug."),
 };
 
+export const createEventInputSchema = {
+  organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
+  name: z.string().describe("Event name (English)."),
+  slug: z
+    .string()
+    .regex(/^[a-zA-Z0-9.-]+$/)
+    .describe("URL slug, unique within the organizer: letters, digits, dots and dashes only, e.g. 'summer-fest-2026'."),
+  date_from: z.string().describe("Start date/time, ISO 8601, e.g. '2026-11-20T19:00:00+01:00'."),
+  date_to: z.string().optional().describe("End date/time, ISO 8601."),
+  currency: z.string().length(3).default("EUR").describe("ISO 4217 currency code, e.g. 'EUR'."),
+  timezone: z.string().default("UTC").describe("IANA timezone name, e.g. 'Europe/Madrid'."),
+  location: z.string().optional().describe("Venue/location text."),
+  testmode: z.boolean().default(true).describe("Create in test mode, so orders are marked as test orders."),
+  confirm: z
+    .boolean()
+    .describe("Must be explicitly set to true to actually create the event. Call once with confirm=false to preview first."),
+};
+
+export const updateEventInputSchema = {
+  organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
+  event: z.string().describe("Event slug."),
+  name: z.string().optional().describe("New name (English), if changing."),
+  date_from: z.string().optional().describe("New start date/time (ISO 8601), if changing."),
+  date_to: z.string().nullable().optional().describe("New end date/time (ISO 8601), or null to clear, if changing."),
+  location: z.string().optional().describe("New location text (English), if changing."),
+  live: z
+    .boolean()
+    .optional()
+    .describe("Take the shop live (true) or offline (false). pretix rejects going live until the event has a quota and payment configured."),
+  testmode: z.boolean().optional().describe("Turn test mode on or off, if changing."),
+  confirm: z
+    .boolean()
+    .describe("Must be explicitly set to true to actually update the event. Call once with confirm=false to preview first."),
+};
+
 export const listItemsInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
   event: z.string().describe("Event slug."),
@@ -127,6 +162,86 @@ export async function listEvents(client: PretixClient, input: { organizer?: stri
 export async function getEvent(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
   return client.get<PretixEvent>(`/organizers/${organizer}/events/${input.event}/`);
+}
+
+export async function createEvent(
+  client: PretixClient,
+  input: {
+    organizer?: string;
+    name: string;
+    slug: string;
+    date_from: string;
+    date_to?: string;
+    currency: string;
+    timezone: string;
+    location?: string;
+    testmode: boolean;
+    confirm: boolean;
+  },
+) {
+  const organizer = client.organizer(input.organizer);
+
+  // pretix refuses "live": true on creation until quotas and payment exist,
+  // so events always start offline; use pretix_update_event to go live.
+  const body: Record<string, unknown> = {
+    name: { en: input.name },
+    slug: input.slug,
+    live: false,
+    testmode: input.testmode,
+    currency: input.currency,
+    timezone: input.timezone,
+    date_from: input.date_from,
+    date_to: input.date_to ?? null,
+    has_subevents: false,
+  };
+  if (input.location !== undefined) body.location = { en: input.location };
+
+  if (!input.confirm) {
+    return {
+      performed: false,
+      message: "Dry run — no event created. Re-call with confirm=true to actually create it. It will start offline (not live).",
+      would_create: body,
+    };
+  }
+
+  const created = await client.post<PretixEvent>(`/organizers/${organizer}/events/`, body);
+  return { performed: true, slug: created.slug, live: created.live };
+}
+
+export async function updateEvent(
+  client: PretixClient,
+  input: {
+    organizer?: string;
+    event: string;
+    name?: string;
+    date_from?: string;
+    date_to?: string | null;
+    location?: string;
+    live?: boolean;
+    testmode?: boolean;
+    confirm: boolean;
+  },
+) {
+  const organizer = client.organizer(input.organizer);
+
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = { en: input.name };
+  if (input.date_from !== undefined) patch.date_from = input.date_from;
+  if (input.date_to !== undefined) patch.date_to = input.date_to;
+  if (input.location !== undefined) patch.location = { en: input.location };
+  if (input.live !== undefined) patch.live = input.live;
+  if (input.testmode !== undefined) patch.testmode = input.testmode;
+
+  if (!input.confirm) {
+    return {
+      performed: false,
+      message: "Dry run — no change made. Re-call with confirm=true to apply this update.",
+      would_change: patch,
+    };
+  }
+
+  const updated = await client.patch<PretixEvent>(`/organizers/${organizer}/events/${input.event}/`, patch);
+  return { performed: true, slug: updated.slug, live: updated.live, testmode: updated.testmode };
 }
 
 interface PretixItem {
