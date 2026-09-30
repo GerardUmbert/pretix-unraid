@@ -36,6 +36,17 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+  // One line per request (never the secret or body) so connection problems
+  // can be diagnosed from `docker logs`.
+  const startedAt = Date.now();
+  res.on("close", () => {
+    console.log(
+      `[mcp] ${req.method} ${req.url} mcp-method=${req.headers["mcp-method"] ?? "-"} ` +
+        `proto=${req.headers["mcp-protocol-version"] ?? "-"} -> ${res.statusCode} ` +
+        `${Date.now() - startedAt}ms`,
+    );
+  });
+
   if (req.url === "/health" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
