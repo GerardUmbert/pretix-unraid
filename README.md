@@ -109,7 +109,7 @@ No config file is needed — the image has SQLite and `/data` built in.
    ```
 5. Create an admin user:
    ```
-   docker exec -it pretix python3 -m pretix createsuperuser
+   docker exec -it -u pretixuser pretix pretix createsuperuser
    ```
 
 ## How to run (plain Docker, no Unraid)
