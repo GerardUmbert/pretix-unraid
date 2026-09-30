@@ -1,3 +1,5 @@
+# Builds the image on push to master (Dockerfile/entrypoint changes) or manually.
+# Uses the automatic GITHUB_TOKEN to push to GHCR - no repo secrets to configure.
 name: Build and push pretix custom image
 
 on:
