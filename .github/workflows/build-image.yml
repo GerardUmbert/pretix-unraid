@@ -26,6 +26,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR image names must be lowercase, GitHub usernames may not be.
+      - name: Lowercase owner
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/build-push-action@v6
@@ -33,5 +37,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/pretix-custom:latest
-            ghcr.io/${{ github.repository_owner }}/pretix-custom:${{ github.sha }}
+            ghcr.io/${{ env.OWNER }}/pretix-custom:latest
+            ghcr.io/${{ env.OWNER }}/pretix-custom:${{ github.sha }}
