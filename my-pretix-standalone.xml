@@ -15,7 +15,7 @@
   <TemplateURL>https://raw.githubusercontent.com/GerardUmbert/pretix-unraid/master/my-pretix-standalone.xml</TemplateURL>
   <Icon>https://pretix.eu/media/pretix-logo.png</Icon>
   <ExtraParams>--restart=unless-stopped --log-opt max-size=10m --log-opt max-file=3</ExtraParams>
-  <PostArgs>all</PostArgs>
+  <PostArgs>web</PostArgs>
   <DonateText/>
   <DonateLink/>
   <Requires/>

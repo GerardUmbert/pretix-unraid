@@ -113,8 +113,13 @@ a thin wrapper, not grow into a general-purpose custom pretix image.
 Facts about the base image (verified by running it, not assumed):
 - Base OS: Debian 13 (trixie).
 - Entrypoint: `/usr/local/bin/pretix` (a bash wrapper), invoked as
-  `pretix all` to run migrations then start web+worker+cron via
-  supervisord. Runs as `pretixuser`.
+  `pretix web` to run migrations then start nginx + gunicorn via
+  supervisord. Runs as `pretixuser`. We use `web`, not `all`: `all` also
+  starts a Celery task worker, which with no broker configured just
+  retries a connection to RabbitMQ on 127.0.0.1:5672 forever (log spam,
+  no function - tasks run inline in the web process). Neither mode runs
+  the periodic-task cron (`pretix cron`), so scheduled jobs such as
+  order expiry don't run in this test setup.
 - Config file search order: `/etc/pretix/pretix.cfg`,
   `~/.pretix.cfg`, `./pretix.cfg` (see `pretix/settings.py`).
 - Exposes port 80 internally for the web UI.

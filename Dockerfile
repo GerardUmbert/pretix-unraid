@@ -23,4 +23,4 @@ RUN chmod +x /usr/local/bin/docker-entrypoint-plugins.sh
 # site-packages, then drops to pretixuser itself via setpriv before
 # running pretix. Do not add "USER pretixuser" here.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint-plugins.sh"]
-CMD ["all"]
+CMD ["web"]
