@@ -6,11 +6,11 @@ Community Applications template for pretix, so this is a manually
 installed template XML.
 
 This builds on top of pretix's own official `pretix/standalone:stable`
-image, configured with SQLite instead of Postgres and no Redis/Celery
+image, with a Postgres 17 running inside the same container (unix socket only) and no Redis/Celery
 broker (pretix falls back to running background tasks inline when no
 `[celery]`/`[redis]` section is present). No extra containers, no ports
-beyond the web UI are exposed — nothing here touches other services
-(Postgres, Redis, etc.) already running on the NAS.
+beyond the web UI are exposed, and the bundled Postgres opens no network
+port, so nothing here touches other services already running on the NAS.
 
 On top of the stock image, this repo adds a thin `Dockerfile` +
 `docker-entrypoint-plugins.sh` that can install extra pretix plugins
@@ -81,7 +81,10 @@ since the install happens at container start, not build time.
 
 ## How to run (Unraid)
 
-No config file is needed — the image has SQLite and `/data` built in.
+No config file is needed — the image has its internal Postgres and `/data` built in.
+If an older SQLite `db.sqlite3` is found in `/data` on first start, its data
+(users, tokens, events, orders) is copied into Postgres automatically and the
+file is kept as `db.sqlite3.migrated`.
 
 1. Copy `my-pretix-standalone.xml` into Unraid's user-templates folder:
    ```
@@ -130,5 +133,5 @@ same way as above.
 ## Tearing it down
 
 Remove the container and delete the appdata/data folder
-(`/mnt/user/appdata/pretix/` on Unraid, or `./data` locally) — SQLite
-means everything lives in that one folder, nothing else to clean up.
+(`/mnt/user/appdata/pretix/` on Unraid, or `./data` locally) — the
+Postgres data lives in `data/postgres`, so everything is in that one folder.

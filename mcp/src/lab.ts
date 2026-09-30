@@ -178,7 +178,9 @@ export async function seedOrders(c: PretixClient, input: { event: string; count:
     const status: "p" | "n" = roll < 0.65 ? "p" : "n";
     const cancelAfter = roll > 0.92;
     const positions = Array.from({ length: pick([1, 1, 1, 2, 2, 3, 4]) }, () => {
-      const item = pick(items);
+      // Seated products can only be sold while seats are left.
+      const usable = items.filter((i) => !seatsByProduct.has(i.id) || (seatsByProduct.get(i.id)?.length ?? 0) > 0);
+      const item = pick(usable.length ? usable : items);
       const variation = item.has_variations ? pick(item.variations.filter((v) => v.active)) : undefined;
       const price = variation?.default_price ?? item.default_price;
       const holder = Math.random() < 0.6 ? buyer : person();

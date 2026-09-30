@@ -19,18 +19,32 @@ RUN npm run build && npm prune --omit=dev
 FROM pretix/standalone:stable
 
 # Config defaults via pretix's PRETIX_<SECTION>_<KEY> env vars, so no
-# pretix.cfg needs to be mounted. SQLite is pretix's default backend and
-# the DB lands in <datadir>/db.sqlite3. PRETIX_PRETIX_URL is deliberately
-# not set here - it is host-specific and comes from the Unraid template.
-# NUM_WORKERS: the base image defaults to 2 x CPU cores gunicorn workers, which
-# all fight over SQLite's single write lock ("database is locked", worker
-# timeouts) on a many-core host. Override with a container variable if needed.
+# pretix.cfg needs to be mounted. PRETIX_PRETIX_URL is deliberately not set
+# here - it is host-specific and comes from the Unraid template.
+#
+# Database: a Postgres 17 installed below runs inside this container (started
+# by docker-entrypoint-plugins.sh, data in /data/postgres) and pretix talks to
+# it over a unix socket only - no TCP port is opened or published. SQLite hit
+# "database is locked" once several workers wrote at the same time. Set
+# PRETIX_INTERNAL_POSTGRES=false to fall back to the old SQLite file
+# (/data/db.sqlite3). NUM_WORKERS caps the base image's 2 x CPU cores default.
 ENV PRETIX_PRETIX_DATADIR=/data \
     PRETIX_PRETIX_INSTANCE_NAME=pretix-test \
-    NUM_WORKERS=2
+    PRETIX_DATABASE_BACKEND=postgresql \
+    PRETIX_DATABASE_NAME=pretix \
+    PRETIX_DATABASE_USER=pretixuser \
+    PRETIX_DATABASE_HOST=/run/pretix-pg \
+    NUM_WORKERS=4
 
 USER root
+RUN mkdir -p /etc/postgresql-common \
+ && echo 'create_main_cluster = false' > /etc/postgresql-common/createcluster.conf \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends postgresql \
+ && rm -rf /var/lib/apt/lists/* \
+ && test -x /usr/lib/postgresql/17/bin/initdb
 COPY docker-entrypoint-plugins.sh /usr/local/bin/docker-entrypoint-plugins.sh
+COPY pretix-db-copy.py /usr/local/bin/pretix-db-copy.py
 RUN chmod +x /usr/local/bin/docker-entrypoint-plugins.sh
 
 # Bundled pretix MCP server (base image already ships Node). Two ways in:

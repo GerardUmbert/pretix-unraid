@@ -64,14 +64,21 @@ plain URL (e.g. for local development: `npm run build` +
 
 The pretix template/container side is explicitly NOT a production
 setup:
-- Uses SQLite instead of Postgres.
+- Uses a Postgres 17 that runs *inside* the same container (unix socket
+  only, data in `/data/postgres`, started by
+  `docker-entrypoint-plugins.sh`), not a separate DB service. It replaced
+  SQLite because several workers writing at once hit `database is locked`.
+  On first start with an existing `/data/db.sqlite3`, the entrypoint copies
+  its data into Postgres (`pretix-db-copy.py`) and renames the file to
+  `db.sqlite3.migrated`; `PRETIX_INTERNAL_POSTGRES=false` falls back to
+  SQLite.
 - No Redis/Celery broker (pretix falls back to running tasks inline when
   `[celery]`/`[redis]` sections are absent from `pretix.cfg`).
 - No backup/upgrade story. To "reset," delete the appdata folder (or
   use the `pretix-reset` skill).
 
-Do not "improve" this toward a production-grade setup (adding Postgres,
-Redis, HTTPS termination, etc.) unless explicitly asked — that would
+Do not "improve" this toward a production-grade setup (adding Redis, an
+external Postgres, HTTPS termination, etc.) unless explicitly asked — that would
 contradict the repo's actual purpose. If real production use is wanted,
 point to pretix's own docker-compose stack in the
 [self-hosting docs](https://docs.pretix.eu/self-hosting/) instead of
@@ -97,8 +104,8 @@ extending this repo.
   `/data` — same pattern as the user's Subtitlarr template.
 - `pretix.cfg` — pretix's own config file format (`configparser`/INI).
   No longer mounted by the Unraid template: the image sets
-  `PRETIX_PRETIX_DATADIR`/`PRETIX_PRETIX_INSTANCE_NAME` via `ENV` (SQLite
-  is pretix's default backend), and the host-specific
+  `PRETIX_PRETIX_DATADIR`/`PRETIX_PRETIX_INSTANCE_NAME` via `ENV` and the
+  `PRETIX_DATABASE_*` variables for the internal Postgres, and the host-specific
   `PRETIX_PRETIX_URL` is a template variable. Pretix reads any config
   option from a `PRETIX_<SECTION>_<KEY>` env var, which takes precedence
   over the file (verified in `pretix/helpers/config.py`). The file is
@@ -162,7 +169,8 @@ Facts about the base image (verified by running it, not assumed):
 
 ## Config file (`pretix.cfg`) notes
 
-- `[database] backend=sqlite3` — no external DB needed.
+- `[database]` mirrors the image's env defaults (internal Postgres over a
+  unix socket); the env vars win anyway.
 - No `[redis]` / `[celery]` section — this is intentional, not an
   oversight. Do not add one without also adding a Redis service, and do
   not add one at all unless the user asks for it, since it changes the
@@ -217,11 +225,10 @@ own migrate call as "redundant" without re-testing a fresh volume.
 
 - Only the web UI port (mapped host-side via the Unraid template,
   default `8345`) is ever exposed to the host.
-- No internal Postgres/Redis ports are published — there are no
-  internal Postgres/Redis processes in this setup at all. Do not add
-  port mappings for database/cache ports; the user has existing
-  Postgres/Redis instances on their NAS and this setup must never
-  collide with or reach toward those.
+- The bundled Postgres listens on a unix socket only (no TCP port), so
+  nothing database-related is exposed or published, and it cannot collide
+  with any other database on the NAS. Do not add port mappings for
+  database/cache ports, and do not point this setup at other databases.
 
 ## Verifying changes
 
