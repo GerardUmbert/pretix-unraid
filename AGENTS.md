@@ -34,6 +34,17 @@ if the Funnel is on, so that secret is the only protection then — keep it
 long and out of chats/repos. The stdio entry point still works via
 `docker exec -i pretix node /opt/pretix-mcp/dist/index.js`.
 
+The same node process also serves a small test-lab page at `/lab`
+(`mcp/src/lab.ts`, `lab-page.ts`; nginx `location /lab`): buttons to
+create a demo event, fill random orders, simulate transfers, check-ins
+and cancellations, and clear test data. The page is static; `/lab/api/*`
+needs the same bearer secret. "Clear" only deletes events that are in test
+mode and not live (plus their orders and `TEST` seating plans) and needs
+the word CLEAR; there is deliberately no full wipe, so users, teams,
+tokens and the organizer are never touched. Orders created by the MCP or
+the lab in a test-mode event are flagged as test orders, which is what
+lets pretix delete them.
+
 Intended use: the MCP is a backoffice helper (trace ticket flow/history,
 fast setup); a separate custom app is expected to call pretix's API
 directly for orders, tickets/QRs and transfers. **Customer accounts are

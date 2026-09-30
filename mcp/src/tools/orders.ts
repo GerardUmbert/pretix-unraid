@@ -363,7 +363,12 @@ export async function createOrder(
     };
   }
 
+  // API-created orders are only flagged as test orders when asked; in a
+  // test-mode event that flag is what lets them be deleted again later.
+  const { testmode } = await client.get<{ testmode: boolean }>(`/organizers/${organizer}/events/${input.event}/`);
+
   const created = await client.post<PretixOrder>(`/organizers/${organizer}/events/${input.event}/orders/`, {
+    ...(testmode ? { testmode: true } : {}),
     email: input.email,
     locale: "en",
     sales_channel: "web",

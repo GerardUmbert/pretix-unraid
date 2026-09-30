@@ -134,3 +134,13 @@ claude mcp add --transport http pretix --scope user https://<your-pretix-url>/mc
 Without all three variables the endpoint is not started. If pretix is
 exposed to the internet (e.g. a Tailscale Funnel), `/mcp` is too, and the
 secret is the only protection.
+
+## Test lab (`/lab`)
+
+When the HTTP server runs inside the container, `https://<host>/lab` serves
+a small page for throwaway test data: create a demo event, fill random
+orders, simulate ticket transfers, check-ins and cancellations, and clear
+test data. Enter `PRETIX_MCP_TOKEN` once on the page; every action goes
+through `/lab/api/*` with that bearer secret. Clearing deletes only events
+in test mode that are not live, together with their orders; it never
+touches users, teams, tokens or the organizer.
