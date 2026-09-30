@@ -54,13 +54,21 @@ extending this repo.
 - `.github/workflows/build-image.yml` — builds and pushes the image to
   GHCR on push to `master`. Unraid can't `docker build` itself, so a
   registry push is required for the Unraid template to consume the image.
-- `pretix-standalone.xml` — Unraid Docker template (Unraid's XML schema
+- `my-pretix-standalone.xml` — Unraid Docker template (Unraid's XML schema
   for the "Add Container" UI, consumed by Unraid's dockerMan plugin). Its
-  `<Repository>`/`<Registry>` fields have a `REPLACE_WITH_GITHUB_USERNAME`
-  placeholder — that's intentional, not a bug, until the user fills in
-  their actual GitHub username/registry path.
-- `pretix.cfg` — pretix's own config file format (`configparser`/INI),
-  mounted read-only into the container at `/etc/pretix/pretix.cfg`.
+  `<Repository>`/`<Registry>`/`<TemplateURL>` point at the user's GitHub
+  (`GerardUmbert`) GHCR package and raw XML. It has `PUID`/`PGID`
+  (default 99/100, Unraid's nobody:users) handled by
+  `docker-entrypoint-plugins.sh`, which remaps `pretixuser` and chowns
+  `/data` — same pattern as the user's Subtitlarr template.
+- `pretix.cfg` — pretix's own config file format (`configparser`/INI).
+  No longer mounted by the Unraid template: the image sets
+  `PRETIX_PRETIX_DATADIR`/`PRETIX_PRETIX_INSTANCE_NAME` via `ENV` (SQLite
+  is pretix's default backend), and the host-specific
+  `PRETIX_PRETIX_URL` is a template variable. Pretix reads any config
+  option from a `PRETIX_<SECTION>_<KEY>` env var, which takes precedence
+  over the file (verified in `pretix/helpers/config.py`). The file is
+  still mounted by `scripts/pretix-api/reset.sh` for local dev.
 - `README.md` — human-facing install/run/build instructions for the
   pretix container/Unraid template side.
 - `USE_CASES.md` — the actual day-to-day flows `mcp/` supports, and how
@@ -176,14 +184,14 @@ own migrate call as "redundant" without re-testing a fresh volume.
 
 ## Verifying changes
 
-If you change `pretix-standalone.xml` or `pretix.cfg` in a way that
+If you change `my-pretix-standalone.xml` or `pretix.cfg` in a way that
 affects runtime behavior, verify it actually boots rather than assuming:
 
 ```sh
 docker build -t pretix-custom:local .
 docker run -d --name pretix-test \
   -v pretix_test_data:/data \
-  -v "$(pwd)/pretix.cfg:/etc/pretix/pretix.cfg:ro" \
+  -e PRETIX_PRETIX_URL=http://localhost:18345 \
   -p 18345:80 \
   pretix-custom:local
 

@@ -77,7 +77,7 @@ separate expansion — not something to guess at ahead of time.
 
 ## Developing / testing this locally
 
-The pretix instance in this repo (`pretix-standalone.xml` /
+The pretix instance in this repo (`my-pretix-standalone.xml` /
 `Dockerfile`) is the target to develop `pretix-mcp` against. Three
 repo-local skills automate the loop:
 

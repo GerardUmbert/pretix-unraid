@@ -30,8 +30,11 @@ which use the supported docker-compose stack (Postgres + Redis + pretix).
   builds this Dockerfile and pushes it to GHCR (GitHub Container
   Registry) on every push to `master` that touches the Dockerfile or
   entrypoint script.
-- `pretix-standalone.xml` — Unraid Docker template.
-- `pretix.cfg` — pretix config file, mounted read-only into the container.
+- `my-pretix-standalone.xml` — Unraid Docker template.
+- `pretix.cfg` — optional pretix config file, used only by the local
+  dev scripts. The image itself needs no config file: SQLite and the data
+  path are built in, and the public URL comes from the
+  `PRETIX_PRETIX_URL` env var (a field in the Unraid template).
 
 ## Building and publishing the image
 
@@ -47,9 +50,9 @@ itself. This repo's image is built and published via GitHub Actions:
    matches what you want (public, or private + linked to this repo so
    your NAS can pull it — private GHCR packages need a PAT for `docker
    login` on the Unraid side).
-4. Edit `pretix-standalone.xml`'s `<Repository>` (and `<Registry>`) to
-   replace `REPLACE_WITH_GITHUB_USERNAME` with your actual GitHub
-   username before installing the template on Unraid.
+4. `my-pretix-standalone.xml`'s `<Repository>`, `<Registry>` and
+   `<TemplateURL>` already point at `GerardUmbert`'s GHCR/GitHub. If you
+   fork this, change them to your own username.
 
 You can also build and run it fully locally without any registry, e.g.
 for testing changes to the Dockerfile before pushing:
@@ -58,7 +61,7 @@ for testing changes to the Dockerfile before pushing:
 docker build -t pretix-custom:local .
 docker run -d --name pretix-test \
   -v pretix_test_data:/data \
-  -v "$(pwd)/pretix.cfg:/etc/pretix/pretix.cfg:ro" \
+  -e PRETIX_PRETIX_URL=http://localhost:18345 \
   -p 18345:80 \
   pretix-custom:local
 ```
@@ -78,17 +81,27 @@ since the install happens at container start, not build time.
 
 ## How to run (Unraid)
 
-1. Create the appdata folder and place `pretix.cfg` inside it:
+No config file is needed — the image has SQLite and `/data` built in.
+
+1. Copy `my-pretix-standalone.xml` into Unraid's user-templates folder:
    ```
-   /mnt/user/appdata/pretix/pretix.cfg
+   /boot/config/plugins/dockerMan/templates-user/my-pretix-standalone.xml
    ```
-2. Copy `pretix-standalone.xml` into Unraid's user-templates folder:
-   ```
-   /boot/config/plugins/dockerMan/templates-user/pretix-standalone.xml
-   ```
-3. Docker tab → Add Container → select the **pretix** template.
+2. Docker tab → Add Container → select the **pretix** template.
    Check the web UI port (default `8345`) doesn't collide with anything
-   else, then Apply.
+   else.
+3. Set **Public URL** to the address you will actually browse to, since
+   pretix builds links and CSRF/cookie checks from it and login breaks
+   if it doesn't match:
+   - LAN: `http://<nas-ip>:8345`
+   - Cloudflare Tunnel: the tunnel's `https://` hostname (point the
+     tunnel's service at `http://<nas-ip>:8345`). Only one URL is
+     supported, so LAN access to the UI won't work cleanly alongside it.
+     Consider Cloudflare Access in front, since this is a throwaway
+     instance with no hardening.
+
+   Then Apply. To change it later, edit the field and restart the
+   container — no rebuild needed.
 4. First boot runs database migrations (~30-60s), plus plugin install if
    `PRETIX_PLUGINS` is set. Once up, the UI is at:
    ```
@@ -106,7 +119,7 @@ mkdir -p ./data
 docker build -t pretix-custom:local .
 docker run -d --name pretix \
   -v "$(pwd)/data:/data" \
-  -v "$(pwd)/pretix.cfg:/etc/pretix/pretix.cfg:ro" \
+  -e PRETIX_PRETIX_URL=http://localhost:8345 \
   -p 8345:80 \
   pretix-custom:local
 ```
