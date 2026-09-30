@@ -122,7 +122,7 @@ Facts about the base image (verified by running it, not assumed):
   order expiry don't run in this test setup.
 - Config file search order: `/etc/pretix/pretix.cfg`,
   `~/.pretix.cfg`, `./pretix.cfg` (see `pretix/settings.py`).
-- Exposes port 80 internally for the web UI.
+- Upstream nginx listens on port 80; our Dockerfile rewrites it to 8345 so the container port matches the template's host port (Unraid's Tailscale Serve/Funnel hook proxies to the host-mapped port number from inside the container, so 8345->80 broke Funnel).
 
 ## Config file (`pretix.cfg`) notes
 
@@ -197,7 +197,7 @@ docker build -t pretix-custom:local .
 docker run -d --name pretix-test \
   -v pretix_test_data:/data \
   -e PRETIX_PRETIX_URL=http://localhost:18345 \
-  -p 18345:80 \
+  -p 18345:8345 \
   pretix-custom:local
 
 # poll until it responds, e.g.:

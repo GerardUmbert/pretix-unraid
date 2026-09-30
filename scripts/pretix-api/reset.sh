@@ -26,7 +26,7 @@ echo "[reset] Starting fresh container from image \"$IMAGE\"..."
 docker run -d --name "$CONTAINER" \
   -v "$VOLUME:/data" \
   -v "$CONFIG_FILE:/etc/pretix/pretix.cfg:ro" \
-  -p "$PORT:80" \
+  -p "$PORT:8345" \
   "$IMAGE"
 
 echo "[reset] Waiting for pretix to finish migrating..."

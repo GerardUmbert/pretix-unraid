@@ -62,7 +62,7 @@ docker build -t pretix-custom:local .
 docker run -d --name pretix-test \
   -v pretix_test_data:/data \
   -e PRETIX_PRETIX_URL=http://localhost:18345 \
-  -p 18345:80 \
+  -p 18345:8345 \
   pretix-custom:local
 ```
 
@@ -120,7 +120,7 @@ docker build -t pretix-custom:local .
 docker run -d --name pretix \
   -v "$(pwd)/data:/data" \
   -e PRETIX_PRETIX_URL=http://localhost:8345 \
-  -p 8345:80 \
+  -p 8345:8345 \
   pretix-custom:local
 ```
 

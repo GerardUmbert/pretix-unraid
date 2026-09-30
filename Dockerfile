@@ -19,6 +19,13 @@ USER root
 COPY docker-entrypoint-plugins.sh /usr/local/bin/docker-entrypoint-plugins.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint-plugins.sh
 
+# nginx listens on 8345 instead of 80 so the container port equals the host
+# port in the Unraid template. Unraid's Tailscale Serve/Funnel hook proxies
+# to localhost:<host-mapped port> from inside the container, so an 8345->80
+# mapping leaves it pointing at a port nothing listens on.
+RUN sed -i 's/listen 80 /listen 8345 /; s/listen \[::\]:80 /listen [::]:8345 /' /etc/nginx/nginx.conf \
+ && test "$(grep -c 'listen .*8345' /etc/nginx/nginx.conf)" = 2
+
 # Stays as root: the entrypoint needs root to pip-install into
 # site-packages, then drops to pretixuser itself via setpriv before
 # running pretix. Do not add "USER pretixuser" here.
