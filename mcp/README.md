@@ -54,7 +54,7 @@ explicit `confirm: true`; call it once without `confirm` (or with
    - `PRETIX_API_TOKEN` — the token from step 2
    - `PRETIX_ORGANIZER` — your organizer slug
    - `PRETIX_TOOL_GROUPS` — (optional) comma-separated groups to enable,
-     e.g. `orders,checkin,core`. Defaults to `orders,checkin` if unset.
+     e.g. `orders,checkin,core`. Defaults to all groups if unset.
      There is no default event slug — every tool takes `event` as an
      explicit parameter, since managing multiple events concurrently was
      a stated requirement.

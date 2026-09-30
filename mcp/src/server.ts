@@ -14,20 +14,17 @@ export type ToolGroup = "orders" | "checkin" | "core" | "sales" | "crm" | "admin
 export const ALL_TOOL_GROUPS: ToolGroup[] = ["orders", "checkin", "core", "sales", "crm", "admin"];
 
 /**
- * Reads PRETIX_TOOL_GROUPS (comma-separated) from env. Defaults to
- * "orders,checkin" - the two groups with the tools this server was
- * originally built and verified around - rather than defaulting to
- * everything, so a fresh install doesn't dump 60-90 tools on a client
- * that hasn't opted into that yet.
+ * Reads PRETIX_TOOL_GROUPS (comma-separated) from env. Defaults to every
+ * group when unset or when it contains no valid group name.
  */
 export function loadToolGroupsFromEnv(): Set<ToolGroup> {
   const raw = process.env.PRETIX_TOOL_GROUPS;
-  if (!raw) return new Set(["orders", "checkin"]);
+  if (!raw) return new Set(ALL_TOOL_GROUPS);
   const groups = raw
     .split(",")
     .map((g) => g.trim())
     .filter((g): g is ToolGroup => ALL_TOOL_GROUPS.includes(g as ToolGroup));
-  return new Set(groups.length > 0 ? groups : ["orders", "checkin"]);
+  return new Set(groups.length > 0 ? groups : ALL_TOOL_GROUPS);
 }
 
 function asToolResult(data: unknown) {
