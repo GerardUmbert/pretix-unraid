@@ -15,7 +15,7 @@
   <WebUI>http://[IP]:[PORT:8345]/control/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/GerardUmbert/pretix-unraid/master/my-pretix-standalone.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/pretix/pretix/master/src/pretix/static/pretixbase/img/icons/apple-touch-icon.png</Icon>
-  <ExtraParams>--memory=4g --memory-swap=4g --restart=unless-stopped --log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <ExtraParams>--memory=4g --memory-swap=4g --restart=unless-stopped --ulimit nofile=262144:262144 --log-opt max-size=10m --log-opt max-file=3</ExtraParams>
   <PostArgs>web</PostArgs>
   <DonateText/>
   <DonateLink/>
