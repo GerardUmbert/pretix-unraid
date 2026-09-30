@@ -56,6 +56,8 @@ export const getItemInputSchema = {
   item_id: z.number().int().describe("Item (product) ID."),
 };
 
+const metaDataSchema = z.record(z.string(), z.string());
+
 export const createItemInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
   event: z.string().describe("Event slug."),
@@ -63,6 +65,16 @@ export const createItemInputSchema = {
   default_price: z.string().describe("Default price, e.g. '10.00'."),
   tax_rate: z.string().default("0.00").describe("Tax rate percentage, e.g. '19.00'."),
   category_id: z.number().int().optional().describe("Category ID to place this item under."),
+  variations: z
+    .array(
+      z.object({
+        name: z.string().describe("Variation name (English), e.g. 'Table A'."),
+        price: z.string().optional().describe("Variation price. Omit to use the item default price."),
+      }),
+    )
+    .optional()
+    .describe("Create the item with variations (e.g. table or seat-zone options). The item then must be bought with one of them."),
+  meta_data: metaDataSchema.optional().describe("Key/value metadata on the item. Keys must first be declared per event with pretix_create_item_meta_property."),
   confirm: z
     .boolean()
     .describe("Must be explicitly set to true to actually create the item. Call once with confirm=false to preview first."),
@@ -75,6 +87,7 @@ export const updateItemInputSchema = {
   name: z.string().optional().describe("New name (English), if changing."),
   default_price: z.string().optional().describe("New default price, if changing."),
   active: z.boolean().optional().describe("Whether the item is active/purchasable, if changing."),
+  meta_data: metaDataSchema.optional().describe("Replace the item's key/value metadata, if changing."),
   confirm: z
     .boolean()
     .describe("Must be explicitly set to true to actually update the item. Call once with confirm=false to preview first."),
@@ -116,6 +129,10 @@ export const createQuotaInputSchema = {
   name: z.string().describe("Quota name."),
   size: z.number().int().nullable().describe("Quota capacity, or null for unlimited."),
   item_ids: z.array(z.number().int()).min(1).describe("Item IDs this quota covers."),
+  variation_ids: z
+    .array(z.number().int())
+    .optional()
+    .describe("Variation IDs this quota covers. Required for items with variations (from pretix_list_variations)."),
   confirm: z
     .boolean()
     .describe("Must be explicitly set to true to actually create the quota. Call once with confirm=false to preview first."),
@@ -251,6 +268,9 @@ interface PretixItem {
   default_price: string;
   tax_rate: string;
   category: number | null;
+  has_variations?: boolean;
+  variations?: Array<{ id: number; value: Record<string, string>; default_price: string | null }>;
+  meta_data?: Record<string, string>;
 }
 
 export async function listItems(client: PretixClient, input: { organizer?: string; event: string }) {
@@ -266,6 +286,13 @@ export async function listItems(client: PretixClient, input: { organizer?: strin
       default_price: i.default_price,
       tax_rate: i.tax_rate,
       category: i.category,
+      has_variations: i.has_variations ?? false,
+      variations: (i.variations ?? []).map((v) => ({
+        id: v.id,
+        name: v.value.en ?? Object.values(v.value)[0],
+        price: v.default_price,
+      })),
+      meta_data: i.meta_data ?? {},
     })),
   };
 }
@@ -287,6 +314,8 @@ export async function createItem(
     default_price: string;
     tax_rate: string;
     category_id?: number;
+    variations?: Array<{ name: string; price?: string }>;
+    meta_data?: Record<string, string>;
     confirm: boolean;
   },
 ) {
@@ -296,18 +325,42 @@ export async function createItem(
     return {
       performed: false,
       message: "Dry run — no item created. Re-call with confirm=true to actually create it.",
-      would_create: { name: input.name, default_price: input.default_price, tax_rate: input.tax_rate },
+      would_create: {
+        name: input.name,
+        default_price: input.default_price,
+        tax_rate: input.tax_rate,
+        variations: input.variations,
+        meta_data: input.meta_data,
+      },
     };
   }
 
+  const hasVariations = (input.variations?.length ?? 0) > 0;
   const created = await client.post<PretixItem>(`/organizers/${organizer}/events/${input.event}/items/`, {
     name: { en: input.name },
     default_price: input.default_price,
     tax_rate: input.tax_rate,
     category: input.category_id ?? null,
+    ...(input.meta_data ? { meta_data: input.meta_data } : {}),
+    ...(hasVariations
+      ? {
+          has_variations: true,
+          variations: input.variations!.map((v, i) => ({
+            value: { en: v.name },
+            default_price: v.price ?? null,
+            active: true,
+            position: i,
+          })),
+        }
+      : {}),
   });
 
-  return { performed: true, item_id: created.id, name: input.name };
+  return {
+    performed: true,
+    item_id: created.id,
+    name: input.name,
+    variations: (created.variations ?? []).map((v) => ({ id: v.id, name: v.value.en ?? Object.values(v.value)[0] })),
+  };
 }
 
 export async function updateItem(
@@ -319,6 +372,7 @@ export async function updateItem(
     name?: string;
     default_price?: string;
     active?: boolean;
+    meta_data?: Record<string, string>;
     confirm: boolean;
   },
 ) {
@@ -329,12 +383,19 @@ export async function updateItem(
   if (input.name !== undefined) patch.name = { en: input.name };
   if (input.default_price !== undefined) patch.default_price = input.default_price;
   if (input.active !== undefined) patch.active = input.active;
+  if (input.meta_data !== undefined) patch.meta_data = input.meta_data;
 
   if (!input.confirm) {
     return {
       performed: false,
       message: "Dry run — no change made. Re-call with confirm=true to apply this update.",
-      current: { id: current.id, name: current.name.en, default_price: current.default_price, active: current.active },
+      current: {
+        id: current.id,
+        name: current.name.en,
+        default_price: current.default_price,
+        active: current.active,
+        meta_data: current.meta_data ?? {},
+      },
       would_change: patch,
     };
   }
@@ -401,6 +462,7 @@ interface PretixQuota {
   name: string;
   size: number | null;
   items: number[];
+  variations?: number[];
   closed: boolean;
 }
 
@@ -435,7 +497,15 @@ export async function getQuotaAvailability(
 
 export async function createQuota(
   client: PretixClient,
-  input: { organizer?: string; event: string; name: string; size: number | null; item_ids: number[]; confirm: boolean },
+  input: {
+    organizer?: string;
+    event: string;
+    name: string;
+    size: number | null;
+    item_ids: number[];
+    variation_ids?: number[];
+    confirm: boolean;
+  },
 ) {
   const organizer = client.organizer(input.organizer);
 
@@ -443,7 +513,7 @@ export async function createQuota(
     return {
       performed: false,
       message: "Dry run — no quota created. Re-call with confirm=true to actually create it.",
-      would_create: { name: input.name, size: input.size, item_ids: input.item_ids },
+      would_create: { name: input.name, size: input.size, item_ids: input.item_ids, variation_ids: input.variation_ids ?? [] },
     };
   }
 
@@ -451,6 +521,7 @@ export async function createQuota(
     name: input.name,
     size: input.size,
     items: input.item_ids,
+    variations: input.variation_ids ?? [],
   });
 
   return { performed: true, quota_id: created.id, name: input.name };

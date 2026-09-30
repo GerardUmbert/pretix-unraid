@@ -81,12 +81,17 @@ export async function getTicketStatus(
     status: order.status,
     status_label: ORDER_STATUS_LABELS[order.status],
     email: order.email,
+    comment: order.comment ?? "",
     total: order.total,
     last_modified: order.last_modified,
     positions: order.positions.map((p) => ({
       position_id: p.id,
       positionid: p.positionid,
       attendee_name: p.attendee_name,
+      item: p.item,
+      variation: p.variation,
+      seat: p.seat ? { name: p.seat.name, seat_guid: p.seat.seat_guid } : null,
+      answers: p.answers ?? [],
       canceled: p.canceled,
       currently_checked_in:
         p.checkins.length > 0 && p.checkins[p.checkins.length - 1].type === "entry",

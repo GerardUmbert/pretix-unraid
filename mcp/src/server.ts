@@ -6,6 +6,7 @@ import { transferTicketInputSchema, transferTicket } from "./tools/transfer.js";
 import * as orders from "./tools/orders.js";
 import * as checkin from "./tools/checkin.js";
 import * as core from "./tools/core.js";
+import * as catalog from "./tools/catalog.js";
 import * as sales from "./tools/sales.js";
 import * as crm from "./tools/crm.js";
 import * as admin from "./tools/admin.js";
@@ -270,6 +271,66 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       "pretix_update_quota",
       { description: "Update an existing quota. Call with confirm=false first to preview.", inputSchema: core.updateQuotaInputSchema },
       wrap(core.updateQuota, client),
+    );
+    server.registerTool(
+      "pretix_list_variations",
+      { description: "List the variations of an item (e.g. table or zone options).", inputSchema: catalog.listVariationsInputSchema },
+      wrap(catalog.listVariations, client),
+    );
+    server.registerTool(
+      "pretix_create_variation",
+      { description: "Add a variation to an item (switches the item to has_variations). Call with confirm=false first to preview.", inputSchema: catalog.createVariationInputSchema },
+      wrap(catalog.createVariation, client),
+    );
+    server.registerTool(
+      "pretix_update_variation",
+      { description: "Update an item variation's name, price or active flag. Call with confirm=false first to preview.", inputSchema: catalog.updateVariationInputSchema },
+      wrap(catalog.updateVariation, client),
+    );
+    server.registerTool(
+      "pretix_list_questions",
+      { description: "List custom questions (e.g. dietary restrictions, accessibility notes) asked per ticket.", inputSchema: catalog.listQuestionsInputSchema },
+      wrap(catalog.listQuestions, client),
+    );
+    server.registerTool(
+      "pretix_create_question",
+      { description: "Create a custom per-ticket question such as dietary restrictions (choice) or accessibility needs (text). Answers are attached to order positions. Call with confirm=false first to preview.", inputSchema: catalog.createQuestionInputSchema },
+      wrap(catalog.createQuestion, client),
+    );
+    server.registerTool(
+      "pretix_update_question",
+      { description: "Update a custom question. Call with confirm=false first to preview.", inputSchema: catalog.updateQuestionInputSchema },
+      wrap(catalog.updateQuestion, client),
+    );
+    server.registerTool(
+      "pretix_list_seating_plans",
+      { description: "List organizer-level seating plans.", inputSchema: catalog.listSeatingPlansInputSchema },
+      wrap(catalog.listSeatingPlans, client),
+    );
+    server.registerTool(
+      "pretix_create_seating_plan",
+      { description: "Create a seating plan from full layout JSON or a simple rows/tables grid. Call with confirm=false first to preview.", inputSchema: catalog.createSeatingPlanInputSchema },
+      wrap(catalog.createSeatingPlan, client),
+    );
+    server.registerTool(
+      "pretix_set_event_seating_plan",
+      { description: "Attach a seating plan to an event and map seat categories to items (or detach with null). Call with confirm=false first to preview.", inputSchema: catalog.setEventSeatingPlanInputSchema },
+      wrap(catalog.setEventSeatingPlan, client),
+    );
+    server.registerTool(
+      "pretix_list_seats",
+      { description: "List an event's seats with their GUIDs and whether they are taken or blocked.", inputSchema: catalog.listSeatsInputSchema },
+      wrap(catalog.listSeats, client),
+    );
+    server.registerTool(
+      "pretix_list_item_meta_properties",
+      { description: "List the item metadata keys (per event) that items may carry in meta_data.", inputSchema: catalog.listItemMetaPropertiesInputSchema },
+      wrap(catalog.listItemMetaProperties, client),
+    );
+    server.registerTool(
+      "pretix_create_item_meta_property",
+      { description: "Declare an item metadata key for an event. Required once before items can set meta_data for it. Call with confirm=false first to preview.", inputSchema: catalog.createItemMetaPropertyInputSchema },
+      wrap(catalog.createItemMetaProperty, client),
     );
   }
 

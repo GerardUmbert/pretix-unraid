@@ -51,6 +51,8 @@ export interface PretixOrderPosition {
   attendee_name: string | null;
   attendee_email?: string | null;
   secret: string;
+  seat?: { id: number; name: string; seat_guid: string } | null;
+  answers?: Array<{ question: number; answer: string; question_identifier?: string; options?: number[] }>;
   canceled: boolean;
   checkins: PretixCheckin[];
 }
@@ -60,6 +62,7 @@ export interface PretixOrder {
   event: string;
   status: OrderStatus;
   email: string | null;
+  comment?: string;
   datetime: string;
   last_modified: string;
   total: string;

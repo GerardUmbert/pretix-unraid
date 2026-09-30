@@ -67,6 +67,24 @@ export const createOrderInputSchema = {
         price: z.string().describe("Price for this position, e.g. '10.00'."),
         attendee_name: z.string().optional().describe("Attendee name for this position."),
         attendee_email: z.string().optional().describe("Attendee email for this position."),
+        variation: z.number().int().optional().describe("Variation ID, required if the item has variations (from pretix_list_variations)."),
+        seat: z
+          .string()
+          .optional()
+          .describe("Seat GUID to assign (from pretix_list_seats). The event needs a seating plan and the item must be mapped to the seat's category."),
+        answers: z
+          .array(
+            z.object({
+              question: z.number().int().describe("Question ID (from pretix_list_questions)."),
+              answer: z.string().describe("The answer text, e.g. a dietary note or accessibility request."),
+              options: z
+                .array(z.number().int())
+                .optional()
+                .describe("Option IDs, required for choice / multiple-choice questions."),
+            }),
+          )
+          .optional()
+          .describe("Answers to custom questions for this position, e.g. table number, dietary restrictions, accessibility needs."),
         secret: z
           .string()
           .optional()
@@ -81,6 +99,10 @@ export const createOrderInputSchema = {
     .string()
     .optional()
     .describe("Custom order code (A-Z, 0-9, excluding O and 1). Omit to let pretix generate one."),
+  comment: z
+    .string()
+    .optional()
+    .describe("Internal staff note on the order (not shown to the buyer), e.g. a special request received by phone."),
   confirm: z
     .boolean()
     .describe("Must be explicitly set to true to actually create the order. Call once with confirm=false to preview what would be created."),
@@ -304,7 +326,17 @@ export async function createOrder(
     email: string;
     status: "n" | "p";
     send_email: boolean;
-    positions: Array<{ item: number; price: string; attendee_name?: string; attendee_email?: string; secret?: string }>;
+    positions: Array<{
+      item: number;
+      price: string;
+      attendee_name?: string;
+      attendee_email?: string;
+      variation?: number;
+      seat?: string;
+      answers?: Array<{ question: number; answer: string; options?: number[] }>;
+      secret?: string;
+    }>;
+    comment?: string;
     customer_id?: string;
     code?: string;
     confirm: boolean;
@@ -320,6 +352,7 @@ export async function createOrder(
     positions: input.positions,
     customer_id: input.customer_id ?? null,
     code: input.code ?? "(auto-generated)",
+    comment: input.comment ?? null,
   };
 
   if (!input.confirm) {
@@ -338,9 +371,10 @@ export async function createOrder(
     status: input.status,
     payment_provider: "manual",
     invoice_address: {},
-    customer: input.customer_id ?? null,
+    ...(input.customer_id ? { customer: input.customer_id } : {}),
     send_email: input.send_email,
     code: input.code,
+    ...(input.comment ? { comment: input.comment } : {}),
     positions: input.positions,
   });
 
@@ -352,6 +386,9 @@ export async function createOrder(
     positions: created.positions.map((p) => ({
       positionid: p.positionid,
       attendee_name: p.attendee_name,
+      variation: p.variation,
+      seat: p.seat ? { name: p.seat.name, seat_guid: p.seat.seat_guid } : null,
+      answers: p.answers ?? [],
       secret: p.secret,
     })),
   };
