@@ -15,7 +15,8 @@ export interface PretixConfig {
 }
 
 export function loadConfigFromEnv(): PretixConfig {
-  const baseUrl = process.env.PRETIX_BASE_URL;
+  // Falls back to the container's own public URL so the bundled copy needs no extra setting.
+  const baseUrl = process.env.PRETIX_BASE_URL ?? process.env.PRETIX_PRETIX_URL;
   const token = process.env.PRETIX_API_TOKEN;
   const organizer = process.env.PRETIX_ORGANIZER;
   const event = process.env.PRETIX_EVENT;

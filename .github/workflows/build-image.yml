@@ -8,6 +8,7 @@ on:
     paths:
       - Dockerfile
       - docker-entrypoint-plugins.sh
+      - mcp/**
       - .github/workflows/build-image.yml
   workflow_dispatch: {}
 

@@ -1,0 +1,7 @@
+.git
+.github
+data
+mcp/node_modules
+mcp/dist
+plans
+scripts

@@ -18,15 +18,22 @@ Two things, deliberately kept in one repo:
    wanted "the MCP inside the Unraid thing with everything" rather than
    two separate repos.
 
-**Important distinction**: the MCP server does NOT run on the Unraid
-NAS. It runs on whatever machine the AI client (e.g. Claude Code) runs
-on, connecting to it via stdio — the NAS only ever runs the pretix
-container itself, which `mcp/` then talks to over HTTP via its REST API
-(pointed at the NAS's IP, or at a local throwaway instance during
-development). Don't build Docker/Unraid packaging for `mcp/` itself
-unless explicitly asked — that would be a real architecture change
-(stdio → network transport), not a file move, and wasn't what was
-requested.
+**Important distinction**: the MCP server is *shipped inside* the custom
+pretix image (the user explicitly asked for this) at `/opt/pretix-mcp`,
+built by a Node build stage in the `Dockerfile` and run on demand with
+`docker exec -i pretix node /opt/pretix-mcp/dist/index.js`. It is NOT a
+long-running service and opens no port: it still speaks stdio, so the
+AI client on the user's PC reaches it by running that command (e.g. over
+`ssh <nas> docker exec -i ...`). Do not add a network transport or
+publish a port for it without asking — that would put a token-holding
+API in front of the NAS. It reads its config from container env vars
+(`PRETIX_API_TOKEN`, `PRETIX_ORGANIZER`, `PRETIX_TOOL_GROUPS`, set in the
+Unraid template; the token field is masked and lives only in the NAS's
+container settings). `PRETIX_BASE_URL` defaults to `PRETIX_PRETIX_URL`
+because pretix rejects requests whose Host header is not its configured
+URL, so `localhost` will not work from inside the container. For local
+development, `mcp/` can still be run directly with `npm run build` +
+`node mcp/dist/index.js` against a local throwaway instance.
 
 The pretix template/container side is explicitly NOT a production
 setup:
@@ -88,8 +95,10 @@ extending this repo.
   — its own commit history is preserved (`git log --follow` inside
   `mcp/` will show pre-merge commits). Has its own `package.json`/
   `tsconfig.json`/`.gitignore` (`node_modules/`, `dist/`) — it's a
-  Node project living inside this repo, not integrated into any
-  Docker build here. See `mcp/README.md` for its own setup instructions.
+  Node project; the root `Dockerfile` builds it in a `mcp-build` stage
+  and copies the result into the image (`.github/workflows/build-image.yml`
+  rebuilds the image on `mcp/**` changes). See `mcp/README.md` for its
+  own setup instructions.
 - `scripts/pretix-api/` — Node scripts (`seed.mjs`, `test.mjs`) and a
   bash script (`reset.sh`) for resetting/seeding/testing the local
   pretix instance. These call pretix's real REST API directly (plus

@@ -110,3 +110,18 @@ See `../plans/mcp-server.md`'s "Explicitly out of scope" section for
 the full reasoning: no GDPR data shredders, no API token minting, no
 event create/clone/delete, no seating-plan editing, no pretix Hosted
 billing internals, no organizer-level plugin management.
+
+## Bundled in the pretix container
+
+The Unraid image built from this repo already contains a compiled copy of
+this server at `/opt/pretix-mcp`, so nothing needs building or installing
+on your PC. Set `MCP API Token` (a team API key; the key needs a name) and
+`MCP Organizer` in the container's template settings, then point your MCP
+client at the container, e.g. over SSH:
+
+```sh
+claude mcp add pretix --scope user -- ssh root@<nas-ip> docker exec -i pretix node /opt/pretix-mcp/dist/index.js
+```
+
+`PRETIX_BASE_URL` defaults to the container's Public URL. Keep `--scope
+user` so no config containing the NAS address ends up in a repo.
