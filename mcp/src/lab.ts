@@ -43,6 +43,19 @@ interface Seat {
   orderposition: number | null;
 }
 
+/** SQLite can answer 5xx ("database is locked") under load; 4xx are real errors and are not retried. */
+async function retrying<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const clientError = err instanceof PretixApiError && err.status >= 400 && err.status < 500;
+      if (clientError || i >= attempts) throw err;
+      await new Promise((r) => setTimeout(r, 1000 * i));
+    }
+  }
+}
+
 const base = (c: PretixClient, event: string) => `/organizers/${c.organizer()}/events/${event}`;
 
 async function all<T>(c: PretixClient, path: string, cap = 30): Promise<T[]> {
@@ -194,7 +207,7 @@ export async function seedOrders(c: PretixClient, input: { event: string; count:
       };
     });
     try {
-      const order = await c.post<PretixOrder>(`${ev}/orders/`, {
+      const order = await retrying(() => c.post<PretixOrder>(`${ev}/orders/`, {
         email: buyer.email,
         locale: "en",
         sales_channel: "web",
@@ -205,8 +218,8 @@ export async function seedOrders(c: PretixClient, input: { event: string; count:
         send_email: false,
         ...(testmode ? { testmode: true } : {}),
         positions,
-      });
-      if (cancelAfter) await c.post(`${ev}/orders/${order.code}/mark_canceled/`, { send_email: false });
+      }));
+      if (cancelAfter) await retrying(() => c.post(`${ev}/orders/${order.code}/mark_canceled/`, { send_email: false }));
       created.push(order.code);
     } catch (err) {
       failures.push(err instanceof PretixApiError ? JSON.stringify(err.body).slice(0, 160) : String(err));

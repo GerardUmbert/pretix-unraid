@@ -22,8 +22,12 @@ FROM pretix/standalone:stable
 # pretix.cfg needs to be mounted. SQLite is pretix's default backend and
 # the DB lands in <datadir>/db.sqlite3. PRETIX_PRETIX_URL is deliberately
 # not set here - it is host-specific and comes from the Unraid template.
+# NUM_WORKERS: the base image defaults to 2 x CPU cores gunicorn workers, which
+# all fight over SQLite's single write lock ("database is locked", worker
+# timeouts) on a many-core host. Override with a container variable if needed.
 ENV PRETIX_PRETIX_DATADIR=/data \
-    PRETIX_PRETIX_INSTANCE_NAME=pretix-test
+    PRETIX_PRETIX_INSTANCE_NAME=pretix-test \
+    NUM_WORKERS=2
 
 USER root
 COPY docker-entrypoint-plugins.sh /usr/local/bin/docker-entrypoint-plugins.sh
