@@ -5,6 +5,34 @@
 # entrypoint as pretixuser - same user the upstream image runs as.
 set -euo pipefail
 
+# PUID/PGID: remap pretixuser so files in the data volume are owned by the
+# host user Unraid expects (default nobody:users, 99:100) - same pattern
+# as the LinuxServer.io images. Upstream pretixuser is 15371:15371 and
+# owns thousands of files under /pretix (node_modules, static assets that
+# updateassets rewrites), so those get re-owned too - once, only when the
+# id actually changes, so restarts stay fast.
+PUID="${PUID:-99}"
+PGID="${PGID:-100}"
+old_uid="$(id -u pretixuser)"
+old_gid="$(id -g pretixuser)"
+if [ "$old_gid" != "$PGID" ]; then
+  groupmod -o -g "$PGID" pretixuser
+  find / -xdev -group "$old_gid" -exec chgrp -h "$PGID" {} +
+fi
+if [ "$old_uid" != "$PUID" ]; then
+  usermod -o -u "$PUID" pretixuser
+  find / -xdev -user "$old_uid" -exec chown -h "$PUID" {} +
+fi
+
+# /data is a bind mount (different filesystem, so skipped by -xdev above).
+# Only recurse when the top-level owner is wrong - a fresh Unraid appdata
+# folder is typically root-owned.
+data_dir="${PRETIX_PRETIX_DATADIR:-/data}"
+mkdir -p "$data_dir"
+if [ "$(stat -c '%u:%g' "$data_dir")" != "$PUID:$PGID" ]; then
+  chown -R "$PUID:$PGID" "$data_dir"
+fi
+
 if [ -n "${PRETIX_PLUGINS:-}" ]; then
   IFS=',' read -ra plugins <<< "$PRETIX_PLUGINS"
   for plugin in "${plugins[@]}"; do

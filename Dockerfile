@@ -8,6 +8,13 @@
 # container's env var and restarting it, no image rebuild needed.
 FROM pretix/standalone:stable
 
+# Config defaults via pretix's PRETIX_<SECTION>_<KEY> env vars, so no
+# pretix.cfg needs to be mounted. SQLite is pretix's default backend and
+# the DB lands in <datadir>/db.sqlite3. PRETIX_PRETIX_URL is deliberately
+# not set here - it is host-specific and comes from the Unraid template.
+ENV PRETIX_PRETIX_DATADIR=/data \
+    PRETIX_PRETIX_INSTANCE_NAME=pretix-test
+
 USER root
 COPY docker-entrypoint-plugins.sh /usr/local/bin/docker-entrypoint-plugins.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint-plugins.sh
