@@ -4,16 +4,37 @@ Guidance for AI coding agents working in this repo.
 
 ## What this repo is
 
-An Unraid Docker template + config for running [pretix](https://pretix.eu/)
-(event ticketing software) as a **throwaway local test instance**. There is
-no official Unraid Community Applications template for pretix, so this
-repo provides a manually installed one.
+Two things, deliberately kept in one repo:
 
-This is explicitly NOT a production setup:
+1. An Unraid Docker template + config for running
+   [pretix](https://pretix.eu/) (event ticketing software) as a
+   **throwaway local test instance**. There is no official Unraid
+   Community Applications template for pretix, so this repo provides a
+   manually installed one.
+2. `mcp/` — an MCP server (`pretix-mcp`) that talks to a pretix
+   instance's REST API, scoped to ticket status/history lookup and
+   invalidate-and-reissue. It was originally its own repo and was merged
+   in (with history, via `git subtree`) once the user decided they
+   wanted "the MCP inside the Unraid thing with everything" rather than
+   two separate repos.
+
+**Important distinction**: the MCP server does NOT run on the Unraid
+NAS. It runs on whatever machine the AI client (e.g. Claude Code) runs
+on, connecting to it via stdio — the NAS only ever runs the pretix
+container itself, which `mcp/` then talks to over HTTP via its REST API
+(pointed at the NAS's IP, or at a local throwaway instance during
+development). Don't build Docker/Unraid packaging for `mcp/` itself
+unless explicitly asked — that would be a real architecture change
+(stdio → network transport), not a file move, and wasn't what was
+requested.
+
+The pretix template/container side is explicitly NOT a production
+setup:
 - Uses SQLite instead of Postgres.
 - No Redis/Celery broker (pretix falls back to running tasks inline when
   `[celery]`/`[redis]` sections are absent from `pretix.cfg`).
-- No backup/upgrade story. To "reset," delete the appdata folder.
+- No backup/upgrade story. To "reset," delete the appdata folder (or
+  use the `pretix-reset` skill).
 
 Do not "improve" this toward a production-grade setup (adding Postgres,
 Redis, HTTPS termination, etc.) unless explicitly asked — that would
@@ -40,17 +61,27 @@ extending this repo.
   their actual GitHub username/registry path.
 - `pretix.cfg` — pretix's own config file format (`configparser`/INI),
   mounted read-only into the container at `/etc/pretix/pretix.cfg`.
-- `README.md` — human-facing install/run/build instructions.
-- `USE_CASES.md` — the actual day-to-day flows `pretix-mcp` (sibling
-  repo) supports, and how to develop/test against this repo's local
-  instance. Read this before `plans/` for "what is this for," and
-  `plans/` for "why is it built this way."
-- `plans/` — design docs for future work (e.g. `pretix-mcp`'s design
-  record). `plans/mcp-server.md` also contains the empirically-verified
-  facts about pretix's API behavior (ticket revocation, order history
-  reconstruction) that `pretix-mcp` and this repo's test scripts depend
-  on — treat it as living documentation of *why*, not just a historical
-  planning artifact, even after the code it describes exists.
+- `README.md` — human-facing install/run/build instructions for the
+  pretix container/Unraid template side.
+- `USE_CASES.md` — the actual day-to-day flows `mcp/` supports, and how
+  to develop/test against this repo's local instance. Read this before
+  `plans/` for "what is this for," and `plans/` for "why is it built
+  this way."
+- `plans/` — design docs for future work. `plans/mcp-server.md` also
+  contains the empirically-verified facts about pretix's API behavior
+  (ticket revocation, order history reconstruction) that `mcp/` and this
+  repo's test scripts depend on — treat it as living documentation of
+  *why*, not just a historical planning artifact, even after the code it
+  describes exists. It still refers to "pretix-mcp" as a separate repo
+  in places since it was written before the merge — that's a historical
+  artifact of the doc, not a sign the merge didn't happen.
+- `mcp/` — the actual MCP server source (TypeScript, `@modelcontextprotocol/sdk`).
+  Merged in via `git subtree` from a formerly-separate `pretix-mcp` repo
+  — its own commit history is preserved (`git log --follow` inside
+  `mcp/` will show pre-merge commits). Has its own `package.json`/
+  `tsconfig.json`/`.gitignore` (`node_modules/`, `dist/`) — it's a
+  Node project living inside this repo, not integrated into any
+  Docker build here. See `mcp/README.md` for its own setup instructions.
 - `scripts/pretix-api/` — Node scripts (`seed.mjs`, `test.mjs`) and a
   bash script (`reset.sh`) for resetting/seeding/testing the local
   pretix instance. These call pretix's real REST API directly (plus

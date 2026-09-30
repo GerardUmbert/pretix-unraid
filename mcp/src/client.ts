@@ -34,7 +34,7 @@ export class PretixClient {
     return `${this.config.baseUrl}/api/v1${path}`;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(this.url(path), {
       method,
       headers: {
@@ -59,6 +59,14 @@ export class PretixClient {
 
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>("POST", path, body ?? {});
+  }
+
+  patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>("PATCH", path, body);
+  }
+
+  delete<T>(path: string): Promise<T> {
+    return this.request<T>("DELETE", path);
   }
 
   /** organizer slug, defaulting to the configured PRETIX_ORGANIZER */
