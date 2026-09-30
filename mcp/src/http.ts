@@ -53,6 +53,16 @@ const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResp
     return;
   }
 
+  // Stateless server: no sessions and no server-initiated messages, so the
+  // optional GET event stream and DELETE session-teardown do not apply.
+  // Answering 405 (instead of holding a stream open forever) is what MCP
+  // clients expect here.
+  if (req.method !== "POST") {
+    res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
+    res.end(JSON.stringify({ error: "Method not allowed" }));
+    return;
+  }
+
   try {
     const bodyText = await readBody(req);
     const parsedBody = bodyText ? JSON.parse(bodyText) : undefined;
