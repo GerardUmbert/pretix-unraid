@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { PretixClient, PretixApiError, type PretixConfig } from "./client.js";
 import { ticketStatusInputSchema, getTicketStatus } from "./tools/ticket-status.js";
 import { reissueTicketInputSchema, reissueTicket } from "./tools/reissue.js";
+import { transferTicketInputSchema, transferTicket } from "./tools/transfer.js";
 import * as orders from "./tools/orders.js";
 import * as checkin from "./tools/checkin.js";
 import * as core from "./tools/core.js";
@@ -103,6 +104,11 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       "pretix_create_order",
       { description: "Create a new order with one or more ticket positions. Supports custom order codes and ticket secrets, useful for syncing tickets an external system already generated. Call with confirm=false first to preview.", inputSchema: orders.createOrderInputSchema },
       wrap(orders.createOrder, client),
+    );
+    server.registerTool(
+      "pretix_transfer_ticket",
+      { description: "Transfer a ticket to a different person: change the attendee name/email on one ticket, optionally the order's contact email, and by default reissue the QR so the previous holder's copy stops working. No customer account is needed. Call with confirm=false first to preview.", inputSchema: transferTicketInputSchema },
+      wrap(transferTicket, client),
     );
     server.registerTool(
       "pretix_mark_order_paid",

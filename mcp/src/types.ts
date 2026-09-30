@@ -49,6 +49,7 @@ export interface PretixOrderPosition {
   variation: number | null;
   price: string;
   attendee_name: string | null;
+  attendee_email?: string | null;
   secret: string;
   canceled: boolean;
   checkins: PretixCheckin[];
