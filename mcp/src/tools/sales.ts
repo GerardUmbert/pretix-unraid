@@ -1,9 +1,13 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
+import { getAllPages } from "./paging.js";
+import { getSlice } from "./paging.js";
 
 export const listVouchersInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
   event: z.string().describe("Event slug."),
+  limit: z.number().int().min(1).max(500).optional().describe("Max rows to return. Default 100."),
+  offset: z.number().int().min(0).optional().describe("Skip this many rows first, to read the next batch. Default 0."),
 };
 
 export const getVoucherInputSchema = {
@@ -75,6 +79,8 @@ export const listDiscountsInputSchema = {
 
 export const listGiftCardsInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
+  limit: z.number().int().min(1).max(500).optional().describe("Max rows to return. Default 100."),
+  offset: z.number().int().min(0).optional().describe("Skip this many rows first, to read the next batch. Default 0."),
 };
 
 interface PretixVoucher {
@@ -89,12 +95,26 @@ interface PretixVoucher {
   tag: string | null;
 }
 
-export async function listVouchers(client: PretixClient, input: { organizer?: string; event: string }) {
+export async function listVouchers(
+  client: PretixClient,
+  input: { organizer?: string; event: string; limit?: number; offset?: number },
+) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ count: number; results: PretixVoucher[] }>(
+  const offset = input.offset ?? 0;
+  const slice = await getSlice<PretixVoucher>(
+    client,
     `/organizers/${organizer}/events/${input.event}/vouchers/`,
+    offset,
+    input.limit ?? 100,
   );
-  return { count: result.count, vouchers: result.results };
+  return {
+    total_matching: slice.total,
+    returned: slice.rows.length,
+    offset,
+    has_more: slice.hasMore,
+    ...(slice.hasMore ? { next_offset: offset + slice.rows.length } : {}),
+    vouchers: slice.rows,
+  };
 }
 
 export async function getVoucher(
@@ -256,9 +276,7 @@ interface PretixDiscount {
 
 export async function listDiscounts(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixDiscount[] }>(
-    `/organizers/${organizer}/events/${input.event}/discounts/`,
-  );
+  const result = { results: (await getAllPages<PretixDiscount>(client, `/organizers/${organizer}/events/${input.event}/discounts/`)).rows };
   return { discounts: result.results };
 }
 
@@ -270,10 +288,24 @@ interface PretixGiftCard {
   expires: string | null;
 }
 
-export async function listGiftCards(client: PretixClient, input: { organizer?: string }) {
+export async function listGiftCards(
+  client: PretixClient,
+  input: { organizer?: string; limit?: number; offset?: number },
+) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ count: number; results: PretixGiftCard[] }>(
+  const offset = input.offset ?? 0;
+  const slice = await getSlice<PretixGiftCard>(
+    client,
     `/organizers/${organizer}/giftcards/`,
+    offset,
+    input.limit ?? 100,
   );
-  return { count: result.count, gift_cards: result.results };
+  return {
+    total_matching: slice.total,
+    returned: slice.rows.length,
+    offset,
+    has_more: slice.hasMore,
+    ...(slice.hasMore ? { next_offset: offset + slice.rows.length } : {}),
+    gift_cards: slice.rows,
+  };
 }

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
 import type { PretixOrder, PretixOrderPosition } from "../types.js";
+import { getAllPages } from "./paging.js";
 
 // pretix's REST API does not expose the order log (the history tab in the
 // admin UI), so this tool reads LogEntry rows through `pretix shell`. That
@@ -53,7 +54,8 @@ def actor(e):
     if e.device_id:
         return "device: %s" % (e.device.name if e.device else e.device_id)
     if e.user_id:
-        return "admin user #%s" % e.user_id
+        name = (getattr(e.user, "fullname", "") or "").strip() if e.user else ""
+        return "admin user: %s (#%s)" % (name, e.user_id) if name else "admin user #%s" % e.user_id
     return "system/customer"
 
 with scopes_disabled():
@@ -323,9 +325,14 @@ export async function getTicketHistory(
 
   // The order endpoint hides canceled tickets, but their history still matters
   // ("what happened to ticket 3?"), so list every position including canceled ones.
-  const withCanceled = await client.get<{ results: PretixOrderPosition[] }>(
-    `${base}/orderpositions/?order=${encodeURIComponent(order.code)}&include_canceled_positions=true`,
-  );
+  const withCanceled = {
+    results: (
+      await getAllPages<PretixOrderPosition>(
+        client,
+        `${base}/orderpositions/?order=${encodeURIComponent(order.code)}&include_canceled_positions=true`,
+      )
+    ).rows,
+  };
   const known = new Set(withCanceled.results.map((p) => p.id));
   let positions = [...withCanceled.results, ...order.positions.filter((p) => !known.has(p.id))].sort(
     (a, b) => a.positionid - b.positionid,

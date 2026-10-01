@@ -3,12 +3,12 @@ import type { PretixClient } from "../client.js";
 import type { PretixOrder, PretixOrderPosition } from "../types.js";
 import { ORDER_STATUS_LABELS } from "../types.js";
 import { buildPositionHistory, runPretixShell, type LogRow } from "./history.js";
+import { getAllPages, getSlice } from "./paging.js";
 
 // Backoffice / customer-support tools built around tickets (order positions).
 // Anything that reads pretix's order log goes through `pretix shell` (see
 // history.ts) and so only works where pretix is installed.
 
-const MAX_PAGES = 200;
 const MAX_BULK = 100;
 
 const organizerField = z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER.");
@@ -22,22 +22,7 @@ const positionidField = z
     "Which ticket within the order (the order's positionid, 1-based, not the internal id). Required if the order has more than one active ticket.",
   );
 
-interface Page<T> {
-  count?: number;
-  next: string | null;
-  results: T[];
-}
-
-async function getAll<T>(client: PretixClient, path: string): Promise<{ rows: T[]; complete: boolean }> {
-  const rows: T[] = [];
-  const sep = path.includes("?") ? "&" : "?";
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await client.get<Page<T>>(`${path}${sep}page=${page}`);
-    rows.push(...res.results);
-    if (!res.next) return { rows, complete: true };
-  }
-  return { rows, complete: false };
-}
+const getAll = getAllPages;
 
 /** Fetches specific orders by code, a few at a time, so large events need no full order scan. */
 async function getOrdersByCode(
@@ -260,6 +245,8 @@ export const listTicketsInputSchema = {
   item: z.number().int().optional().describe("Only this product (item id)."),
   search: z.string().optional().describe("Free-text: holder/buyer name or email, order code, QR start."),
   include_canceled: z.boolean().optional().describe("Include tickets canceled out of their order. Default false."),
+  limit: z.number().int().min(1).max(500).optional().describe("Max tickets to return. Default 100."),
+  offset: z.number().int().min(0).optional().describe("Skip this many tickets first, to read the next batch. Default 0."),
   organizer: organizerField,
 };
 
@@ -272,6 +259,8 @@ export async function listTickets(
     item?: number;
     search?: string;
     include_canceled?: boolean;
+    limit?: number;
+    offset?: number;
     organizer?: string;
   },
 ) {
@@ -284,22 +273,25 @@ export async function listTickets(
   if (input.include_canceled) params.set("include_canceled_positions", "true");
   const query = params.toString();
 
-  const { rows, complete } = await getAll<PretixOrderPosition & { order: string }>(
+  const limit = input.limit ?? 100;
+  const offset = input.offset ?? 0;
+  const { rows, total, hasMore } = await getSlice<PretixOrderPosition & { order: string }>(
     client,
     `/organizers/${organizer}/events/${input.event}/orderpositions/${query ? `?${query}` : ""}`,
+    offset,
+    limit,
   );
-  const { rows: orders, complete: ordersComplete } = await getAll<PretixOrder>(
-    client,
-    `/organizers/${organizer}/events/${input.event}/orders/`,
-  );
-  const byCode = new Map(orders.map((o) => [o.code, o]));
+  // Only the orders of the tickets being returned are fetched, so this stays
+  // fast on events with tens of thousands of orders.
+  const byCode = await getOrdersByCode(client, organizer, input.event, [...new Set(rows.map((p) => p.order))]);
 
   return {
     event: input.event,
-    count: rows.length,
-    scan_complete: complete,
-    // false on very large events: tickets of orders past the scan limit lack buyer and order status
-    buyer_info_complete: ordersComplete,
+    total_matching: total,
+    returned: rows.length,
+    offset,
+    has_more: hasMore,
+    ...(hasMore ? { next_offset: offset + rows.length } : {}),
     tickets: rows.map((p) => {
       const o = byCode.get(p.order);
       return o
@@ -704,7 +696,8 @@ def actor(e):
     if e.device_id:
         return "device: %s" % (e.device.name if e.device else e.device_id)
     if e.user_id:
-        return "admin user #%s" % e.user_id
+        name = (getattr(e.user, "fullname", "") or "").strip() if e.user else ""
+        return "admin user: %s (#%s)" % (name, e.user_id) if name else "admin user #%s" % e.user_id
     return "system/customer"
 
 with scopes_disabled():

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
 import type { CheckinRedeemResponse, PretixOrderPosition } from "../types.js";
+import { getAllPages } from "./paging.js";
+import { getSlice } from "./paging.js";
 
 export const listCheckinListsInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
@@ -18,6 +20,8 @@ export const listCheckinPositionsInputSchema = {
   event: z.string().describe("Event slug."),
   list_id: z.number().int().describe("Check-in list ID (from pretix_list_checkin_lists)."),
   search: z.string().optional().describe("Free-text search, e.g. attendee name or order code."),
+  limit: z.number().int().min(1).max(500).optional().describe("Max rows to return. Default 100."),
+  offset: z.number().int().min(0).optional().describe("Skip this many rows first, to read the next batch. Default 0."),
 };
 
 export const checkinBySecretInputSchema = {
@@ -88,9 +92,7 @@ export async function listCheckinLists(
   input: { organizer?: string; event: string },
 ) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixCheckinList[] }>(
-    `/organizers/${organizer}/events/${input.event}/checkinlists/`,
-  );
+  const result = { results: (await getAllPages<PretixCheckinList>(client, `/organizers/${organizer}/events/${input.event}/checkinlists/`)).rows };
   return { checkin_lists: result.results };
 }
 
@@ -113,22 +115,30 @@ export async function getCheckinStatus(
 
 export async function listCheckinPositions(
   client: PretixClient,
-  input: { organizer?: string; event: string; list_id: number; search?: string },
+  input: { organizer?: string; event: string; list_id: number; search?: string; limit?: number; offset?: number },
 ) {
   const organizer = client.organizer(input.organizer);
   const params = new URLSearchParams();
   if (input.search) params.set("search", input.search);
   const query = params.toString();
 
-  const result = await client.get<{ count: number; results: PretixOrderPosition[] }>(
+  const offset = input.offset ?? 0;
+  const slice = await getSlice<PretixOrderPosition>(
+    client,
     `/organizers/${organizer}/events/${input.event}/checkinlists/${input.list_id}/positions/${
       query ? `?${query}` : ""
     }`,
+    offset,
+    input.limit ?? 100,
   );
 
   return {
-    count: result.count,
-    positions: result.results.map((p) => ({
+    total_matching: slice.total,
+    returned: slice.rows.length,
+    offset,
+    has_more: slice.hasMore,
+    ...(slice.hasMore ? { next_offset: offset + slice.rows.length } : {}),
+    positions: slice.rows.map((p) => ({
       order: p.order,
       positionid: p.positionid,
       attendee_name: p.attendee_name,

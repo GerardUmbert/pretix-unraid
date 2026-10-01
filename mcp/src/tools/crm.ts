@@ -1,9 +1,13 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
+import { getAllPages } from "./paging.js";
+import { getSlice } from "./paging.js";
 
 export const listCustomersInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
   search: z.string().optional().describe("Free-text search, e.g. name or email."),
+  limit: z.number().int().min(1).max(500).optional().describe("Max rows to return. Default 100."),
+  offset: z.number().int().min(0).optional().describe("Skip this many rows first, to read the next batch. Default 0."),
 };
 
 export const getCustomerInputSchema = {
@@ -56,17 +60,28 @@ interface PretixCustomer {
 
 export async function listCustomers(
   client: PretixClient,
-  input: { organizer?: string; search?: string },
+  input: { organizer?: string; search?: string; limit?: number; offset?: number },
 ) {
   const organizer = client.organizer(input.organizer);
   const params = new URLSearchParams();
   if (input.search) params.set("search", input.search);
   const query = params.toString();
 
-  const result = await client.get<{ count: number; results: PretixCustomer[] }>(
+  const offset = input.offset ?? 0;
+  const slice = await getSlice<PretixCustomer>(
+    client,
     `/organizers/${organizer}/customers/${query ? `?${query}` : ""}`,
+    offset,
+    input.limit ?? 100,
   );
-  return { count: result.count, customers: result.results };
+  return {
+    total_matching: slice.total,
+    returned: slice.rows.length,
+    offset,
+    has_more: slice.hasMore,
+    ...(slice.hasMore ? { next_offset: offset + slice.rows.length } : {}),
+    customers: slice.rows,
+  };
 }
 
 export async function getCustomer(
@@ -156,9 +171,7 @@ export async function listMemberships(
   input: { organizer?: string; customer_id: string },
 ) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixMembership[] }>(
-    `/organizers/${organizer}/customers/${input.customer_id}/memberships/`,
-  );
+  const result = { results: (await getAllPages<PretixMembership>(client, `/organizers/${organizer}/customers/${input.customer_id}/memberships/`)).rows };
   return { memberships: result.results };
 }
 
@@ -169,9 +182,7 @@ interface PretixMembershipType {
 
 export async function listMembershipTypes(client: PretixClient, input: { organizer?: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixMembershipType[] }>(
-    `/organizers/${organizer}/membershiptypes/`,
-  );
+  const result = { results: (await getAllPages<PretixMembershipType>(client, `/organizers/${organizer}/membershiptypes/`)).rows };
   return {
     membership_types: result.results.map((t) => ({
       id: t.id,

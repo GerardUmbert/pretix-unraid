@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
+import { getAllPages } from "./paging.js";
 
 export const listWebhooksInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
@@ -60,7 +61,7 @@ interface PretixWebhook {
 
 export async function listWebhooks(client: PretixClient, input: { organizer?: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixWebhook[] }>(`/organizers/${organizer}/webhooks/`);
+  const result = { results: (await getAllPages<PretixWebhook>(client, `/organizers/${organizer}/webhooks/`)).rows };
   return { webhooks: result.results };
 }
 
@@ -151,6 +152,6 @@ interface PretixDevice {
 
 export async function listDevices(client: PretixClient, input: { organizer?: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixDevice[] }>(`/organizers/${organizer}/devices/`);
+  const result = { results: (await getAllPages<PretixDevice>(client, `/organizers/${organizer}/devices/`)).rows };
   return { devices: result.results };
 }

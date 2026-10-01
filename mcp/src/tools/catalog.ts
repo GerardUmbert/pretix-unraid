@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
+import { getAllPages } from "./paging.js";
 
 const organizerField = z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER.");
 const eventField = z.string().describe("Event slug.");
@@ -62,9 +63,7 @@ export async function listVariations(
   input: { organizer?: string; event: string; item_id: number },
 ) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixVariation[] }>(
-    `/organizers/${organizer}/events/${input.event}/items/${input.item_id}/variations/`,
-  );
+  const result = { results: (await getAllPages<PretixVariation>(client, `/organizers/${organizer}/events/${input.event}/items/${input.item_id}/variations/`)).rows };
   return { variations: result.results.map(variationView) };
 }
 
@@ -210,9 +209,7 @@ function questionView(q: PretixQuestion) {
 
 export async function listQuestions(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixQuestion[] }>(
-    `/organizers/${organizer}/events/${input.event}/questions/`,
-  );
+  const result = { results: (await getAllPages<PretixQuestion>(client, `/organizers/${organizer}/events/${input.event}/questions/`)).rows };
   return { questions: result.results.map(questionView) };
 }
 
@@ -399,7 +396,7 @@ interface PretixSeatingPlan {
 
 export async function listSeatingPlans(client: PretixClient, input: { organizer?: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixSeatingPlan[] }>(`/organizers/${organizer}/seatingplans/`);
+  const result = { results: (await getAllPages<PretixSeatingPlan>(client, `/organizers/${organizer}/seatingplans/`)).rows };
   return { seating_plans: result.results.map((p) => ({ id: p.id, name: p.name })) };
 }
 
@@ -496,19 +493,13 @@ export async function listSeats(
   input: { organizer?: string; event: string; available_only: boolean },
 ) {
   const organizer = client.organizer(input.organizer);
-  const seats: PretixSeat[] = [];
-  const MAX_PAGES = 50;
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const params = new URLSearchParams({ page: String(page) });
-    if (input.available_only) params.set("is_available", "true");
-    const result = await client.get<{ next: string | null; results: PretixSeat[] }>(
-      `/organizers/${organizer}/events/${input.event}/seats/?${params}`,
-    );
-    seats.push(...result.results);
-    if (!result.next) break;
-  }
+  const { rows: seats, complete } = await getAllPages<PretixSeat>(
+    client,
+    `/organizers/${organizer}/events/${input.event}/seats/${input.available_only ? "?is_available=true" : ""}`,
+  );
   return {
     count: seats.length,
+    ...(complete ? {} : { complete: false }),
     seats: seats.map((s) => ({
       seat_guid: s.seat_guid,
       zone: s.zone_name,
@@ -545,9 +536,7 @@ interface PretixItemMetaProperty {
 
 export async function listItemMetaProperties(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixItemMetaProperty[] }>(
-    `/organizers/${organizer}/events/${input.event}/item_meta_properties/`,
-  );
+  const result = { results: (await getAllPages<PretixItemMetaProperty>(client, `/organizers/${organizer}/events/${input.event}/item_meta_properties/`)).rows };
   return { properties: result.results };
 }
 

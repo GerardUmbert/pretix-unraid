@@ -1,12 +1,12 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
 import { ORDER_STATUS_LABELS, type PretixOrder } from "../types.js";
+import { MAX_PAGES } from "./paging.js";
 
 // pretix computes "overpaid" / "underpaid" only for its admin UI filter; the
 // REST API order filter takes just n/p/e/c. Each order does carry its total,
 // payments and refunds, so the same arithmetic is done here.
 
-const MAX_PAGES = 200;
 
 export const paymentIssuesInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),

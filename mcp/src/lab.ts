@@ -2,6 +2,7 @@ import type { PretixClient } from "./client.js";
 import { PretixApiError } from "./client.js";
 import { transferTicket } from "./tools/transfer.js";
 import { checkinBySecret } from "./tools/checkin.js";
+import { runPretixShell } from "./tools/history.js";
 import type { PretixOrder } from "./types.js";
 
 // Test-lab actions behind the /lab page (see http.ts). They only touch
@@ -288,20 +289,60 @@ export async function randomCancels(c: PretixClient, input: { event: string; cou
   return { cancelled: done.length, orders: done };
 }
 
+// Deletes test-mode orders with pretix's own bulk delete (the one behind
+// "delete test orders" in the control panel) in small transactions. Doing it
+// order by order over the REST API took minutes per thousand orders and only
+// ever saw the first page of them. One run stops after ~35 s so the HTTP
+// request does not time out; run Clear again to continue.
+const DELETE_ORDERS_SCRIPT = `
+import json, time
+from django.db import transaction
+from django_scopes import scopes_disabled
+from pretix.base.models import Event, Order
+
+with scopes_disabled():
+    ev = Event.objects.get(organizer__slug=PH_ORG, slug=PH_EVENT)
+    if not ev.testmode or ev.live:
+        raise SystemExit("event is not in test mode or is live")
+    started = time.time()
+    deleted = 0
+    while time.time() - started < 35:
+        pks = list(Order.objects.filter(event=ev, testmode=True).values_list("pk", flat=True)[:200])
+        if not pks:
+            break
+        with transaction.atomic():
+            Order.gracefully_delete_bulk(ev, Order.objects.filter(pk__in=pks))
+        deleted += len(pks)
+    print("PH_RESULT " + json.dumps({"deleted": deleted, "remaining": Order.objects.filter(event=ev).count()}))
+`;
+
+async function deleteTestOrders(c: PretixClient, event: string): Promise<{ deleted: number; remaining: number }> {
+  const stdout = await runPretixShell(
+    `PH_ORG = ${JSON.stringify(c.organizer())}\nPH_EVENT = ${JSON.stringify(event)}\n${DELETE_ORDERS_SCRIPT}`,
+  );
+  const line = stdout.split("\n").find((l) => l.startsWith("PH_RESULT "));
+  if (!line) throw new Error(`Order deletion produced no result. Output: ${stdout.trim().slice(-300)}`);
+  return JSON.parse(line.slice("PH_RESULT ".length));
+}
+
 /** Deletes every event in test mode (and its orders). Live or non-test events are never touched. */
 export async function clearTestData(c: PretixClient) {
   const org = c.organizer();
   const events = await listEvents(c);
   const deleted: string[] = [];
   const skipped: Array<{ event: string; reason: string }> = [];
+  const unfinished: Array<{ event: string; orders_left: number }> = [];
   for (const e of events) {
     if (!e.testmode || e.live) {
       skipped.push({ event: e.slug, reason: e.live ? "live" : "not in test mode" });
       continue;
     }
     try {
-      for (const o of await orders(c, e.slug)) {
-        await c.delete(`${base(c, e.slug)}/orders/${o.code}/`);
+      const { remaining } = await deleteTestOrders(c, e.slug);
+      if (remaining > 0) {
+        // out of time (or non-test orders present): the event stays until a later run empties it
+        unfinished.push({ event: e.slug, orders_left: remaining });
+        continue;
       }
       await c.delete(`${base(c, e.slug)}/`);
       deleted.push(e.slug);
@@ -323,5 +364,5 @@ export async function clearTestData(c: PretixClient) {
   } catch {
     // seating plans unavailable
   }
-  return { deleted_events: deleted, skipped, seating_plans_deleted: plansDeleted };
+  return { deleted_events: deleted, unfinished_run_clear_again: unfinished, skipped, seating_plans_deleted: plansDeleted };
 }

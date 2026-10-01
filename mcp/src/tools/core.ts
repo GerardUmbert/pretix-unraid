@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PretixClient } from "../client.js";
+import { getAllPages } from "./paging.js";
 
 export const listEventsInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
@@ -162,7 +163,7 @@ interface PretixEvent {
 
 export async function listEvents(client: PretixClient, input: { organizer?: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixEvent[] }>(`/organizers/${organizer}/events/`);
+  const result = { results: (await getAllPages<PretixEvent>(client, `/organizers/${organizer}/events/`)).rows };
   return {
     events: result.results.map((e) => ({
       slug: e.slug,
@@ -275,9 +276,7 @@ interface PretixItem {
 
 export async function listItems(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixItem[] }>(
-    `/organizers/${organizer}/events/${input.event}/items/`,
-  );
+  const result = { results: (await getAllPages<PretixItem>(client, `/organizers/${organizer}/events/${input.event}/items/`)).rows };
   return {
     items: result.results.map((i) => ({
       id: i.id,
@@ -415,9 +414,7 @@ interface PretixCategory {
 
 export async function listCategories(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixCategory[] }>(
-    `/organizers/${organizer}/events/${input.event}/categories/`,
-  );
+  const result = { results: (await getAllPages<PretixCategory>(client, `/organizers/${organizer}/events/${input.event}/categories/`)).rows };
   return { categories: result.results.map((c) => ({ id: c.id, name: c.name.en ?? Object.values(c.name)[0] })) };
 }
 
@@ -451,9 +448,7 @@ interface PretixTaxRule {
 
 export async function listTaxRules(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixTaxRule[] }>(
-    `/organizers/${organizer}/events/${input.event}/taxrules/`,
-  );
+  const result = { results: (await getAllPages<PretixTaxRule>(client, `/organizers/${organizer}/events/${input.event}/taxrules/`)).rows };
   return { tax_rules: result.results };
 }
 
@@ -468,9 +463,7 @@ interface PretixQuota {
 
 export async function listQuotas(client: PretixClient, input: { organizer?: string; event: string }) {
   const organizer = client.organizer(input.organizer);
-  const result = await client.get<{ results: PretixQuota[] }>(
-    `/organizers/${organizer}/events/${input.event}/quotas/`,
-  );
+  const result = { results: (await getAllPages<PretixQuota>(client, `/organizers/${organizer}/events/${input.event}/quotas/`)).rows };
   return { quotas: result.results };
 }
 

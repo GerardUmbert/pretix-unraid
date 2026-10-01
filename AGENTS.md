@@ -54,6 +54,15 @@ webhooks must come from pretix itself, never from the MCP, since other
 clients make changes too; pretix blocks webhook targets on
 private/CGNAT/Tailscale addresses. Details in `USE_CASES.md`.
 
+Paging: pretix returns 50 rows per list call, so a single `client.get` on a
+list endpoint silently drops the rest. Tools use `mcp/src/tools/paging.ts`:
+`getAllPages` for small config lists (items, quotas, ...) and `getSlice`
+(`limit`/`offset`, with `total_matching`/`has_more`) for data that can be
+huge (tickets, customers, vouchers, gift cards, check-in positions). Do not
+load every order just to look a few up (that capped out at 10,000 orders once
+and silently hid transfers); fetch the needed orders by code. Verified with
+12,000 test orders on a local container.
+
 Gotchas: pretix rejects requests whose Host header is not its configured
 URL, and Node's `fetch` silently ignores a custom `Host` header. So
 inside the container the MCP calls `http://127.0.0.1:8345` with
