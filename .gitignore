@@ -4,3 +4,4 @@
 # OS/editor cruft
 .DS_Store
 Thumbs.db
+scripts/pretix-api/import-*.csv
