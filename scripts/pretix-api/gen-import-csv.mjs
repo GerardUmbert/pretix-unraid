@@ -3,11 +3,12 @@
 // (control panel: event -> Orders -> Import orders) to load-test the instance.
 //
 //   node scripts/pretix-api/gen-import-csv.mjs [--rows 30000] [--max-per-order 4] \
-//        [--items 1,2] [--out scripts/pretix-api/import-30000.csv]
+//        [--items 1,2] [--out <file>]
 //
 // --rows           total tickets (CSV lines). Default 30000.
 // --max-per-order  each order gets 1..N consecutive lines sharing a `grouping`
 //                  value. 1 = one ticket per order. Default 4.
+// --out            output file. Default scripts/pretix-api/import-<orders>-orders-<rows>-tickets.csv
 // --prefix        ticket-code prefix; use a new one per import since codes must be unique. Default STRESS.
 // --items          product ids to pick from at random (ids from the event's
 //                  product list). Must be products that need no seat and have
@@ -16,7 +17,8 @@
 // Upload it in the importer with: Import mode = "Group multiple lines together
 // into one order" (or "Create one order per line" if --max-per-order 1), and
 // map the columns by name. Columns:
-//   grouping, email, item, price, attendee_name (-> Attendee name: Full name),
+//   grouping, email, item, price, attendee_given_name / attendee_family_name (-> Attendee name:
+//   Given name / Family name; if your event uses a single full-name field, join them),
 //   attendee_email, secret (-> Ticket code), comment.
 // The generated data is clearly fake (@example.test) and ticket codes are
 // unique (prefix STRESS-), so the file can be imported only once per event.
@@ -34,7 +36,6 @@ const rows = Number(args.rows ?? 30000);
 const maxPerOrder = Number(args['max-per-order'] ?? 4);
 const items = String(args.items ?? '1').split(',').map((s) => s.trim());
 const prefix = args.prefix ?? 'STRESS';
-const out = args.out ?? `scripts/pretix-api/import-${rows}.csv`;
 
 const first = [
   // Catalan
@@ -78,15 +79,18 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // Every attendee gets a distinct name so "search tickets for this person"
 // finds one holder, like real data. The pool is every first x last pair
 // (shuffled); only if --rows exceeds it do names repeat, with a number added.
-const pool = [...new Set(first)].flatMap((f) => [...new Set(last)].map((l) => `${f} ${l}`));
+const pool = [...new Set(first)].flatMap((f) => [...new Set(last)].map((l) => [f, l]));
 for (let i = pool.length - 1; i > 0; i--) {
   const j = Math.floor(Math.random() * (i + 1));
   [pool[i], pool[j]] = [pool[j], pool[i]];
 }
-const nameFor = (i) => (i < pool.length ? pool[i] : `${pool[i % pool.length]} ${Math.floor(i / pool.length) + 1}`);
+const nameFor = (i) => {
+  const [f, l] = pool[i % pool.length];
+  return i < pool.length ? [f, l] : [f, `${l} ${Math.floor(i / pool.length) + 1}`];
+};
 const esc = (v) => (/[",\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
 
-const lines = ['grouping,email,item,price,attendee_name,attendee_email,secret,comment'];
+const lines = ['grouping,email,item,price,attendee_given_name,attendee_family_name,attendee_email,secret,comment'];
 let order = 0;
 let n = 0;
 while (n < rows) {
@@ -95,13 +99,14 @@ while (n < rows) {
   const buyer = `stress.buyer${order}@example.test`;
   for (let i = 0; i < size; i++) {
     n++;
-    const name = nameFor(n - 1);
+    const [given, family] = nameFor(n - 1);
     lines.push([
       `G${order}`,
       buyer,
       pick(items),
       '', // blank = calculate from product
-      name,
+      given,
+      family,
       `stress.attendee${n}@example.test`,
       `${prefix}-${String(n).padStart(7, '0')}`,
       'stress test',
@@ -109,5 +114,6 @@ while (n < rows) {
   }
 }
 
+const out = args.out ?? `scripts/pretix-api/import-${order}-orders-${rows}-tickets.csv`;
 writeFileSync(out, lines.join('\n') + '\n', 'utf8');
 console.log(`Wrote ${rows} tickets in ${order} orders to ${out}`);
