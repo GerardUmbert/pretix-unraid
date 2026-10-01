@@ -34,6 +34,8 @@ export const denyOrderInputSchema = {
     .describe("Whether to email the customer about the denial. Must be set explicitly."),
 };
 
+const MAX_LIST_PAGES = 20;
+
 export const listOrdersInputSchema = {
   organizer: z.string().optional().describe("Organizer slug. Defaults to PRETIX_ORGANIZER."),
   event: z.string().describe("Event slug."),
@@ -302,19 +304,29 @@ export async function listOrders(
   if (input.search) params.set("search", input.search);
   if (input.page) params.set("page", String(input.page));
 
-  const query = params.toString();
-  const path = `/organizers/${organizer}/events/${input.event}/orders/${query ? `?${query}` : ""}`;
+  type Page = { count: number; next: string | null; results: PretixOrder[] };
+  const fetchPage = (n?: number) => {
+    const p = new URLSearchParams(params);
+    if (n) p.set("page", String(n));
+    const query = p.toString();
+    return client.get<Page>(`/organizers/${organizer}/events/${input.event}/orders/${query ? `?${query}` : ""}`);
+  };
 
-  const result = await client.get<{
-    count: number;
-    next: string | null;
-    results: PretixOrder[];
-  }>(path);
+  // An explicit page returns just that page; otherwise follow every page (capped).
+  const first = await fetchPage(input.page);
+  const results = [...first.results];
+  let next = first.next;
+  for (let n = 2; !input.page && next && n <= MAX_LIST_PAGES; n++) {
+    const res = await fetchPage(n);
+    results.push(...res.results);
+    next = res.next;
+  }
 
   return {
-    count: result.count,
-    has_more_pages: result.next !== null,
-    orders: result.results.map((o) => orderPreview(o)),
+    count: first.count,
+    returned: results.length,
+    has_more_pages: next !== null,
+    orders: results.map((o) => orderPreview(o)),
   };
 }
 
