@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { PretixClient, PretixApiError, type PretixConfig } from "./client.js";
 import { ticketStatusInputSchema, getTicketStatus } from "./tools/ticket-status.js";
 import { reissueTicketInputSchema, reissueTicket } from "./tools/reissue.js";
+import { ticketHistoryInputSchema, getTicketHistory } from "./tools/history.js";
 import { transferTicketInputSchema, transferTicket } from "./tools/transfer.js";
 import * as orders from "./tools/orders.js";
 import * as checkin from "./tools/checkin.js";
@@ -83,6 +84,16 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       inputSchema: ticketStatusInputSchema,
     },
     wrap(getTicketStatus, client),
+  );
+
+  server.registerTool(
+    "pretix_get_ticket_history",
+    {
+      description:
+        "Full history of a ticket across all its QR generations: order placed/paid, every attendee change (transfer) with from/to, every QR regeneration, check-ins and cancellations, read from pretix's own order log (which the REST API does not expose, so this only works where pretix runs, i.e. inside the container). A ticket is identified by order_code + positionid and keeps that identity across reissues and transfers. Prefer this over pretix_get_ticket_status when asked who held a ticket, whether it was transferred, or what happened to it.",
+      inputSchema: ticketHistoryInputSchema,
+    },
+    wrap(getTicketHistory, client),
   );
 
   server.registerTool(

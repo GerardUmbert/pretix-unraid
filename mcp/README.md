@@ -23,7 +23,7 @@ instance from the parent repo.
 
 | Group | Covers | Always on? |
 |---|---|---|
-| — | `pretix_get_ticket_status`, `pretix_reissue_ticket` | Yes, unconditionally |
+| — | `pretix_get_ticket_status`, `pretix_get_ticket_history`, `pretix_reissue_ticket` | Yes, unconditionally |
 | `orders` | List/create orders, mark paid/pending/canceled/expired, reactivate, extend, approve/deny, refunds, ticket download | Default |
 | `checkin` | Check-in lists, status, position search, check-in by secret | Default |
 | `core` | Events, items (with variations and metadata), categories, tax rules, quotas, custom questions (dietary/accessibility notes), seating plans and seats | Opt-in |
@@ -31,9 +31,16 @@ instance from the parent repo.
 | `crm` | Customers, memberships, membership types | Opt-in |
 | `admin` | Webhooks, devices | Opt-in |
 
-Two tools — `pretix_get_ticket_status` and `pretix_reissue_ticket` —
-are always registered regardless of `PRETIX_TOOL_GROUPS`; they predate
+Three tools — `pretix_get_ticket_status`, `pretix_get_ticket_history` and
+`pretix_reissue_ticket` — are always registered regardless of `PRETIX_TOOL_GROUPS`; they predate
 the group system and are this server's original, most-verified core.
+
+`pretix_get_ticket_history` reads pretix's own order log (attendee changes/
+transfers, QR regenerations, check-ins) via `python3 -m pretix shell`, because
+the REST API does not expose that log. It therefore only works where pretix is
+installed (inside the container); set `PRETIX_SHELL_CMD` (e.g.
+`docker exec -i pretix python3 -m pretix shell`) when running elsewhere. pretix
+logs the new attendee values but not the QR secrets themselves.
 
 Every mutating tool (create/update/delete/mark_*/etc.) requires an
 explicit `confirm: true`; call it once without `confirm` (or with
