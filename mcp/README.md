@@ -24,7 +24,7 @@ instance from the parent repo.
 | Group | Covers | Always on? |
 |---|---|---|
 | — | `pretix_get_ticket_status`, `pretix_get_ticket_history`, `pretix_reissue_ticket` | Yes, unconditionally |
-| `orders` | List/create orders, find payment mismatches (overpaid/underpaid, which pretix only exposes as admin-UI filters), mark paid/pending/canceled/expired, reactivate, extend, approve/deny, refunds, ticket download | Default |
+| `orders` | List/create orders, mark paid/pending/canceled/expired, reactivate, extend, approve/deny, refunds, ticket download | Default |
 | `checkin` | Check-in lists, status, position search, check-in by secret | Default |
 | `core` | Events, items (with variations and metadata), categories, tax rules, quotas, custom questions (dietary/accessibility notes), seating plans and seats | Opt-in |
 | `sales` | Vouchers (incl. batch create), discounts, gift cards | Opt-in |

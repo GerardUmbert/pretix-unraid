@@ -5,7 +5,6 @@ import { reissueTicketInputSchema, reissueTicket } from "./tools/reissue.js";
 import { ticketHistoryInputSchema, getTicketHistory } from "./tools/history.js";
 import { transferTicketInputSchema, transferTicket } from "./tools/transfer.js";
 import * as orders from "./tools/orders.js";
-import { paymentIssuesInputSchema, findPaymentIssues } from "./tools/payment-issues.js";
 import * as checkin from "./tools/checkin.js";
 import * as core from "./tools/core.js";
 import * as catalog from "./tools/catalog.js";
@@ -112,11 +111,6 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       "pretix_list_orders",
       { description: "List orders for an event, optionally filtered by status, email, or free-text search.", inputSchema: orders.listOrdersInputSchema },
       wrap(orders.listOrders, client),
-    );
-    server.registerTool(
-      "pretix_find_payment_issues",
-      { description: "Scan an event's orders for payment mismatches that pretix only shows as admin-UI filters: overpaid, underpaid, partially paid, and canceled/expired orders still holding money. Computes confirmed payments minus paid refunds against the order total and explains each hit with its payments and refunds.", inputSchema: paymentIssuesInputSchema },
-      wrap(findPaymentIssues, client),
     );
     server.registerTool(
       "pretix_create_order",
