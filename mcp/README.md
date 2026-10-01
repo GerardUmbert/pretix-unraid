@@ -24,7 +24,7 @@ instance from the parent repo.
 | Group | Covers | Always on? |
 |---|---|---|
 | — | `pretix_get_ticket_status`, `pretix_get_ticket_history`, `pretix_reissue_ticket` | Yes, unconditionally |
-| `orders` | List/create orders, find payment mismatches (overpaid/underpaid, which pretix only exposes as admin-UI filters), mark paid/pending/canceled/expired, reactivate, extend, approve/deny, refunds, ticket download | Default |
+| `orders` | Customer-support ticket tools (find a ticket by email/name/code/QR incl. former holders, list tickets, transfer/reissue report, denied scans, cancel one ticket, block/unblock, resend email, fix details, change product, bulk reissue/cancel/block), list/create orders, find payment mismatches (overpaid/underpaid, which pretix only exposes as admin-UI filters), mark paid/pending/canceled/expired, reactivate, extend, approve/deny, refunds, ticket download | Default |
 | `checkin` | Check-in lists, status, position search, check-in by secret | Default |
 | `core` | Events, items (with variations and metadata), categories, tax rules, quotas, custom questions (dietary/accessibility notes), seating plans and seats | Opt-in |
 | `sales` | Vouchers (incl. batch create), discounts, gift cards | Opt-in |
@@ -35,7 +35,7 @@ Three tools — `pretix_get_ticket_status`, `pretix_get_ticket_history` and
 `pretix_reissue_ticket` — are always registered regardless of `PRETIX_TOOL_GROUPS`; they predate
 the group system and are this server's original, most-verified core.
 
-`pretix_get_ticket_history` reads pretix's own order log (attendee changes/
+`pretix_get_ticket_history`, `pretix_list_transfers`, `pretix_list_denied_scans` and the former-holder part of `pretix_find_ticket` read pretix's own order log (attendee changes/
 transfers, QR regenerations, check-ins) via `python3 -m pretix shell`, because
 the REST API does not expose that log. It therefore only works where pretix is
 installed (inside the container); set `PRETIX_SHELL_CMD` (e.g.

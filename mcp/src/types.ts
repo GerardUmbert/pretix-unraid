@@ -54,6 +54,7 @@ export interface PretixOrderPosition {
   seat?: { id: number; name: string; seat_guid: string } | null;
   answers?: Array<{ question: number; answer: string; question_identifier?: string; options?: number[] }>;
   canceled: boolean;
+  blocked?: string[] | null;
   checkins: PretixCheckin[];
 }
 

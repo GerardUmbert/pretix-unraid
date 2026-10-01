@@ -71,14 +71,14 @@ with scopes_disabled():
     print("PH_RESULT " + json.dumps(out, default=str))
 `;
 
-interface LogRow {
+export interface LogRow {
   datetime: string;
   action_type: string;
   actor: string;
   data: Record<string, any>;
 }
 
-function runPretixShell(script: string): Promise<string> {
+export function runPretixShell(script: string): Promise<string> {
   const custom = process.env.PRETIX_SHELL_CMD?.trim().split(/\s+/);
   const [cmd, ...args] = custom && custom[0] ? custom : ["python3", "-m", "pretix", "shell"];
   return new Promise((resolve, reject) => {
@@ -113,7 +113,7 @@ ${LOG_SCRIPT}`);
   return JSON.parse(line.slice("PH_RESULT ".length)) as LogRow[];
 }
 
-interface HistoryEvent {
+export interface HistoryEvent {
   timestamp: string;
   kind: string;
   description: string;
@@ -170,7 +170,7 @@ function fmtAttendee(
   return `${a.name ?? "no name"}${a.email ? ` <${a.email}>` : ""}`;
 }
 
-function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buyer: string | null) {
+export function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buyer: string | null) {
   const events: HistoryEvent[] = [];
   let generation = 1;
   // Attendee before the first logged change is unknown (pretix logs only the new
@@ -178,6 +178,17 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buy
   let current: { name?: string | null; email?: string | null } | undefined;
 
   for (const row of rows) {
+    if (row.action_type === "pretix.event.order.secret.changed") {
+      generation += 1;
+      events.push({
+        timestamp: row.datetime,
+        actor: row.actor,
+        kind: "qr_reissued",
+        description: `QR codes of the whole order regenerated: the previous QR stopped working. This ticket is now QR generation ${generation}`,
+      });
+      continue;
+    }
+
     const refs = rowPositions(row);
     const mine =
       refs.pks.includes(position.id) ||
@@ -195,7 +206,13 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buy
     if (row.action_type === "pretix.event.order.modified") {
       for (const item of d.data ?? []) {
         if (item.position !== position.id) continue;
+        if (!("attendee_name" in item) && !("attendee_email" in item)) {
+          const keys = Object.keys(item).filter((k) => k !== "position");
+          events.push({ ...base, kind: "details_changed", description: `Ticket details changed (${keys.join(", ") || "other fields"})` });
+          continue;
+        }
         const next = { name: item.attendee_name ?? current?.name, email: item.attendee_email ?? current?.email };
+        if (current && next.name === current.name && next.email === current.email) continue;
         events.push({
           ...base,
           kind: "attendee_changed",
@@ -224,6 +241,18 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buy
         kind: "checkin_denied",
         description: `Scan denied (${d.errorcode ?? "unknown reason"}) on list ${d.list ?? "?"} (QR generation ${generation})`,
       });
+    } else if (row.action_type === "pretix.event.order.changed.cancel") {
+      events.push({ ...base, kind: "ticket_canceled", description: "This ticket was canceled (removed from the order)" });
+    } else if (row.action_type === "pretix.event.order.changed.add_block") {
+      events.push({ ...base, kind: "blocked", description: `Ticket blocked (${d.block_name ?? "unnamed"}): its QR is refused at check-in` });
+    } else if (row.action_type === "pretix.event.order.changed.remove_block") {
+      events.push({ ...base, kind: "unblocked", description: `Ticket block removed (${d.block_name ?? "unnamed"})` });
+    } else if (row.action_type === "pretix.event.order.changed.item") {
+      events.push({
+        ...base,
+        kind: "product_changed",
+        description: `Product changed from item ${d.old_item}${d.old_variation ? ` (variation ${d.old_variation})` : ""} to item ${d.new_item}${d.new_variation ? ` (variation ${d.new_variation})` : ""}`,
+      });
     } else if (row.action_type.startsWith("pretix.event.order.changed.")) {
       events.push({
         ...base,
@@ -246,6 +275,7 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buy
     item: position.item,
     variation: position.variation,
     canceled: position.canceled,
+    blocked: position.blocked ?? [],
     current_attendee_name: position.attendee_name,
     current_attendee_email: position.attendee_email ?? null,
     current_secret: position.secret,
@@ -291,12 +321,20 @@ export async function getTicketHistory(
   const firstEmailChange = rows.find((r) => r.action_type === "pretix.event.order.contact.changed");
   const buyer: string | null = firstEmailChange?.data?.old_email ?? order.email;
 
-  let positions = order.positions;
+  // The order endpoint hides canceled tickets, but their history still matters
+  // ("what happened to ticket 3?"), so list every position including canceled ones.
+  const withCanceled = await client.get<{ results: PretixOrderPosition[] }>(
+    `${base}/orderpositions/?order=${encodeURIComponent(order.code)}&include_canceled_positions=true`,
+  );
+  const known = new Set(withCanceled.results.map((p) => p.id));
+  let positions = [...withCanceled.results, ...order.positions.filter((p) => !known.has(p.id))].sort(
+    (a, b) => a.positionid - b.positionid,
+  );
   if (positionid !== undefined) {
     positions = positions.filter((p) => p.positionid === positionid);
     if (positions.length === 0) {
       throw new Error(
-        `Order ${order.code} has no position ${positionid}. Positions: ${order.positions.map((p) => p.positionid).join(", ")}`,
+        `Order ${order.code} has no position ${positionid}. Positions: ${positions.map((p) => p.positionid).join(", ")}`,
       );
     }
   }

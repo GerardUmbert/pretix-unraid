@@ -5,6 +5,7 @@ import { reissueTicketInputSchema, reissueTicket } from "./tools/reissue.js";
 import { ticketHistoryInputSchema, getTicketHistory } from "./tools/history.js";
 import { transferTicketInputSchema, transferTicket } from "./tools/transfer.js";
 import * as orders from "./tools/orders.js";
+import * as support from "./tools/support.js";
 import { paymentIssuesInputSchema, findPaymentIssues } from "./tools/payment-issues.js";
 import * as checkin from "./tools/checkin.js";
 import * as core from "./tools/core.js";
@@ -112,6 +113,61 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
       "pretix_list_orders",
       { description: "List orders for an event, optionally filtered by status, email, or free-text search.", inputSchema: orders.listOrdersInputSchema },
       wrap(orders.listOrders, client),
+    );
+    server.registerTool(
+      "pretix_find_ticket",
+      { description: "Find tickets from whatever a customer gives you: buyer/attendee email, attendee name, order code, or the ticket's current QR. Searches all events unless one is given, and also finds FORMER holders (every holder after the first change; the original name at purchase is not logged by pretix, so find the first holder via the buyer's email) and the buyer's previous email from the order log. Returns each ticket with order code, positionid and position_id, status, check-in and block state; follow up with pretix_get_ticket_history.", inputSchema: support.findTicketInputSchema },
+      wrap(support.findTicket, client),
+    );
+    server.registerTool(
+      "pretix_list_tickets",
+      { description: "List the tickets (not orders) of an event with holder, buyer, order status, check-in and block state. Filter by order status, checked in or not, product, or free text.", inputSchema: support.listTicketsInputSchema },
+      wrap(support.listTickets, client),
+    );
+    server.registerTool(
+      "pretix_list_transfers",
+      { description: "Event-wide report of tickets whose holder changed (transfers) or whose QR was regenerated, with who/when from the order log: how many and which. Only works where pretix runs (inside the container).", inputSchema: support.listTransfersInputSchema },
+      wrap(support.listTransfers, client),
+    );
+    server.registerTool(
+      "pretix_list_denied_scans",
+      { description: "Scans that pretix refused at check-in (already used, blocked, unpaid, wrong time...) for an event or one order, newest first, with the reason. Answers 'why couldn't this person get in?'. Only works where pretix runs (inside the container).", inputSchema: support.listDeniedScansInputSchema },
+      wrap(support.listDeniedScans, client),
+    );
+    server.registerTool(
+      "pretix_cancel_ticket",
+      { description: "Cancel ONE ticket of an order (the rest of the order stays). Frees its quota/seat; irreversible. Cannot remove the last ticket of an order (cancel the order instead). Call with confirm=false first to preview.", inputSchema: support.cancelTicketInputSchema },
+      wrap(support.cancelTicket, client),
+    );
+    server.registerTool(
+      "pretix_block_ticket",
+      { description: "Block a ticket so its QR is refused at check-in without canceling anything (suspected fraud, dispute). Reversible with pretix_unblock_ticket. Call with confirm=false first to preview.", inputSchema: support.blockTicketInputSchema },
+      wrap(support.blockTicket, client),
+    );
+    server.registerTool(
+      "pretix_unblock_ticket",
+      { description: "Remove a block previously set with pretix_block_ticket (use the same reason name). Call with confirm=false first to preview.", inputSchema: support.blockTicketInputSchema },
+      wrap(support.unblockTicket, client),
+    );
+    server.registerTool(
+      "pretix_resend_ticket_email",
+      { description: "Email the order's contact address a link to its tickets again ('I never got my ticket'). Sends a real email; call with confirm=false first to see the recipient.", inputSchema: support.resendTicketEmailInputSchema },
+      wrap(support.resendTicketEmail, client),
+    );
+    server.registerTool(
+      "pretix_update_ticket_details",
+      { description: "Correct a ticket's attendee name/email/address details without changing its QR (typo fix). To give the ticket to someone else use pretix_transfer_ticket instead. Call with confirm=false first to preview.", inputSchema: support.updateTicketDetailsInputSchema },
+      wrap(support.updateTicketDetails, client),
+    );
+    server.registerTool(
+      "pretix_change_ticket_product",
+      { description: "Change which product/variation (and optionally price) a ticket is, e.g. upgrade General to VIP. The QR is kept; the order total may change and money owed/refundable is handled separately. Call with confirm=false first to preview.", inputSchema: support.changeTicketProductInputSchema },
+      wrap(support.changeTicketProduct, client),
+    );
+    server.registerTool(
+      "pretix_bulk_ticket_action",
+      { description: "Apply one action (reissue QR, cancel ticket, block, unblock) to up to 100 tickets at once, e.g. after a leaked QR batch. confirm=false previews each ticket and lists any that cannot be processed; reissue and cancel are irreversible.", inputSchema: support.bulkTicketActionInputSchema },
+      wrap(support.bulkTicketAction, client),
     );
     server.registerTool(
       "pretix_find_payment_issues",
