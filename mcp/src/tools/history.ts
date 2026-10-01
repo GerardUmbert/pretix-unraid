@@ -215,6 +215,12 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[]) {
           d.forced ? ", forced" : ""
         })`,
       });
+    } else if (row.action_type === "pretix.event.checkin.denied") {
+      events.push({
+        ...base,
+        kind: "checkin_denied",
+        description: `Scan denied (${d.errorcode ?? "unknown reason"}) on list ${d.list ?? "?"} (QR generation ${generation})`,
+      });
     } else if (row.action_type.startsWith("pretix.event.order.changed.")) {
       events.push({
         ...base,
