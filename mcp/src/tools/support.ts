@@ -39,6 +39,28 @@ async function getAll<T>(client: PretixClient, path: string): Promise<{ rows: T[
   return { rows, complete: false };
 }
 
+/** Fetches specific orders by code, a few at a time, so large events need no full order scan. */
+async function getOrdersByCode(
+  client: PretixClient,
+  organizer: string,
+  event: string,
+  codes: string[],
+): Promise<Map<string, PretixOrder>> {
+  const found = new Map<string, PretixOrder>();
+  const queue = [...codes];
+  const worker = async () => {
+    for (let code = queue.shift(); code !== undefined; code = queue.shift()) {
+      try {
+        found.set(code, await client.get<PretixOrder>(`/organizers/${organizer}/events/${event}/orders/${code}/`));
+      } catch {
+        // order deleted or not readable: its log rows are skipped, like before
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, codes.length) }, worker));
+  return found;
+}
+
 function pickPosition(order: PretixOrder, positionid: number | undefined, verb: string): PretixOrderPosition {
   const active = order.positions.filter((p) => !p.canceled);
   if (positionid !== undefined) {
@@ -266,13 +288,18 @@ export async function listTickets(
     client,
     `/organizers/${organizer}/events/${input.event}/orderpositions/${query ? `?${query}` : ""}`,
   );
-  const orders = (await getAll<PretixOrder>(client, `/organizers/${organizer}/events/${input.event}/orders/`)).rows;
+  const { rows: orders, complete: ordersComplete } = await getAll<PretixOrder>(
+    client,
+    `/organizers/${organizer}/events/${input.event}/orders/`,
+  );
   const byCode = new Map(orders.map((o) => [o.code, o]));
 
   return {
     event: input.event,
     count: rows.length,
     scan_complete: complete,
+    // false on very large events: tickets of orders past the scan limit lack buyer and order status
+    buyer_info_complete: ordersComplete,
     tickets: rows.map((p) => {
       const o = byCode.get(p.order);
       return o
@@ -704,8 +731,9 @@ export async function listTransfers(client: PretixClient, input: { event: string
   if (!line) throw new Error(`Order log script produced no result. Output: ${stdout.trim().slice(-300)}`);
   const byOrder = JSON.parse(line.slice("PH_RESULT ".length)) as Record<string, LogRow[]>;
 
-  const { rows: orders } = await getAll<PretixOrder>(client, `/organizers/${organizer}/events/${input.event}/orders/`);
-  const orderByCode = new Map(orders.map((o) => [o.code, o]));
+  // Only the orders that have log entries are fetched; loading every order
+  // silently dropped any past the 10,000th on big events.
+  const orderByCode = await getOrdersByCode(client, organizer, input.event, Object.keys(byOrder));
 
   const tickets: Array<Record<string, unknown>> = [];
   let attendeeChanges = 0;
