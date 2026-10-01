@@ -126,7 +126,7 @@ export function createServer(config: PretixConfig, enabledGroups: Set<ToolGroup>
     );
     server.registerTool(
       "pretix_list_transfers",
-      { description: "Event-wide report of tickets whose holder changed (transfers) or whose QR was regenerated, with who/when from the order log: how many and which. Only works where pretix runs (inside the container).", inputSchema: support.listTransfersInputSchema },
+      { description: "Event-wide report of tickets whose holder changed (transfers) or whose QR was regenerated, from the order log. Always returns a summary of the whole event (how many moved, by how many changes, which actors, how many holder changes left the old QR working) plus a paged list of tickets, one compact line each. Filter by minimum changes, date range, actor, current holder, order or no-QR-reissue; add include_timeline for the full story of each listed ticket. Only works where pretix runs (inside the container).", inputSchema: support.listTransfersInputSchema },
       wrap(support.listTransfers, client),
     );
     server.registerTool(

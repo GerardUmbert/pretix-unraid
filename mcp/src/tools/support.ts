@@ -681,14 +681,34 @@ export async function bulkTicketAction(
 
 export const listTransfersInputSchema = {
   event: z.string().describe("Event slug."),
+  limit: z.number().int().min(1).max(500).optional().describe("Max tickets to list. Default 50. The summary always covers the whole event."),
+  offset: z.number().int().min(0).optional().describe("Skip this many tickets first, to read the next batch. Default 0."),
+  min_changes: z.number().int().min(1).optional().describe("Only tickets whose holder changed at least this many times."),
+  since: z.string().optional().describe("Only tickets moved on or after this date or time (ISO, e.g. 2026-10-01). Counts shown stay all-time."),
+  until: z.string().optional().describe("Only tickets moved on or before this date or time (ISO)."),
+  by: z.string().optional().describe("Only tickets moved by an actor whose name contains this text, e.g. an API token name."),
+  holder: z.string().optional().describe("Only tickets whose current holder name or email contains this text."),
+  order_code: z.string().optional().describe("Only the tickets of this order."),
+  changed_without_reissue: z
+    .boolean()
+    .optional()
+    .describe("true = only tickets whose holder changed but whose QR was never replaced (the previous holder's QR still scans)."),
+  sort: z.enum(["latest", "most_moves"]).optional().describe("latest = most recently moved first (default); most_moves = most holder changes first."),
+  include_timeline: z.boolean().optional().describe("Add the full timeline of each listed ticket. Default false (one compact line per ticket)."),
   organizer: organizerField,
 };
 
-const EVENT_LOG_SCRIPT = `
-import json
-from django_scopes import scopes_disabled
-from pretix.base.models import Order, LogEntry
+// Everything is counted inside pretix's database from the order log, so it
+// stays fast with tens of thousands of moved tickets and never pulls orders
+// through the REST API. Mirrors how buildPositionHistory reads the same rows.
+const TRANSFERS_SCRIPT = `
+import datetime, json
+from collections import Counter, defaultdict
 from django.contrib.contenttypes.models import ContentType
+from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
+from django_scopes import scopes_disabled
+from pretix.base.models import LogEntry, Order, OrderPosition
 
 def actor(e):
     if e.api_token_id:
@@ -700,74 +720,215 @@ def actor(e):
         return "admin user: %s (#%s)" % (name, e.user_id) if name else "admin user #%s" % e.user_id
     return "system/customer"
 
+def to_dt(v, end=False):
+    if not v:
+        return None
+    d = parse_datetime(v)
+    if d is None:
+        day = parse_date(v)
+        if day is None:
+            raise SystemExit("not a valid date: %s" % v)
+        d = datetime.datetime.combine(day, datetime.time.max if end else datetime.time.min)
+    if timezone.is_naive(d):
+        d = timezone.make_aware(d, datetime.timezone.utc)
+    return d
+
+def fmt(who):
+    if who is None:
+        return "original holder (name at purchase not logged by pretix)"
+    name, email = who
+    return "%s%s" % (name or "no name", " <%s>" % email if email else "")
+
 with scopes_disabled():
+    since = to_dt(PH_SINCE)
+    until = to_dt(PH_UNTIL, True)
     ct = ContentType.objects.get_for_model(Order)
-    base = LogEntry.objects.filter(content_type=ct, event__slug=PH_EVENT, event__organizer__slug=PH_ORG)
-    interesting = set(base.filter(action_type__in=[
-        "pretix.event.order.modified", "pretix.event.order.changed.secret", "pretix.event.order.secret.changed",
-    ]).values_list("object_id", flat=True))
-    codes = {o.pk: o.code for o in Order.objects.filter(pk__in=interesting)}
-    out = {}
-    for e in base.filter(object_id__in=interesting).order_by("datetime", "pk").select_related("api_token", "device"):
-        out.setdefault(codes[e.object_id], []).append({
-            "datetime": e.datetime.isoformat(), "action_type": e.action_type, "actor": actor(e), "data": e.parsed_data,
-        })
-    print("PH_RESULT " + json.dumps(out, default=str))
+    positions = OrderPosition.all.filter(order__event__slug=PH_EVENT, order__event__organizer__slug=PH_ORG)
+    logs = LogEntry.objects.filter(content_type=ct, event__slug=PH_EVENT, event__organizer__slug=PH_ORG)
+    if PH_ORDER:
+        order_pks = list(Order.objects.filter(event__slug=PH_EVENT, event__organizer__slug=PH_ORG, code=PH_ORDER).values_list("pk", flat=True))
+        positions = positions.filter(order_id__in=order_pks)
+        logs = logs.filter(object_id__in=order_pks)
+
+    info = {}
+    by_order = defaultdict(list)
+    for p in positions.values("pk", "order_id", "positionid", "attendee_name_cached", "attendee_email", "canceled"):
+        info[p["pk"]] = p
+        by_order[p["order_id"]].append(p["pk"])
+
+    state = {}
+    def ticket(pk):
+        if pk not in info:
+            return None
+        if pk not in state:
+            state[pk] = {"pk": pk, "current": None, "changes": 0, "reissues": 0, "last": None, "in_range": False, "actors": set(), "moves": []}
+        return state[pk]
+
+    def note(t, e, who, kind, text):
+        t["last"] = e.datetime
+        t["actors"].add(who)
+        if (since is None or e.datetime >= since) and (until is None or e.datetime <= until):
+            t["in_range"] = True
+        t["moves"].append({"at": e.datetime.isoformat(), "kind": kind, "what": text, "by": who})
+
+    def reissue(t, e, who):
+        t["reissues"] += 1
+        note(t, e, who, "qr_reissued", "QR code regenerated: the previous QR stopped working. This ticket is now QR generation %d" % (t["reissues"] + 1))
+
+    wanted = ["pretix.event.order.modified", "pretix.event.order.changed.secret", "pretix.event.order.secret.changed"]
+    for e in logs.filter(action_type__in=wanted).order_by("datetime", "pk").select_related("api_token", "device", "user").iterator(chunk_size=2000):
+        d = e.parsed_data or {}
+        who = actor(e)
+        if e.action_type == "pretix.event.order.secret.changed":
+            for pk in by_order.get(e.object_id, []):
+                reissue(ticket(pk), e, who)
+        elif e.action_type == "pretix.event.order.changed.secret":
+            t = ticket(d.get("position"))
+            if t is not None:
+                reissue(t, e, who)
+        else:
+            for item in d.get("data", []) or []:
+                t = ticket(item.get("position"))
+                if t is None or ("attendee_name" not in item and "attendee_email" not in item):
+                    continue
+                cur = t["current"]
+                nxt = (item.get("attendee_name", cur[0] if cur else None), item.get("attendee_email", cur[1] if cur else None))
+                if cur is not None and nxt == cur:
+                    continue
+                t["changes"] += 1
+                note(t, e, who, "attendee_changed", "Attendee changed from %s to %s" % (fmt(cur), fmt(nxt)))
+                t["current"] = nxt
+
+    moved = [t for t in state.values() if t["changes"] or t["reissues"]]
+    hist = Counter(min(t["changes"], 4) for t in moved if t["changes"])
+    by_actor = Counter()
+    for t in moved:
+        for m in t["moves"]:
+            by_actor[m["by"]] += 1
+    lasts = [t["last"] for t in moved if t["last"]]
+    firsts = [t["moves"][0]["at"] for t in moved]
+    summary = {
+        "tickets_moved": len(moved),
+        "tickets_with_holder_change": sum(1 for t in moved if t["changes"]),
+        "tickets_with_qr_reissue": sum(1 for t in moved if t["reissues"]),
+        "total_holder_changes": sum(t["changes"] for t in moved),
+        "total_qr_reissues": sum(t["reissues"] for t in moved),
+        "holder_changed_without_qr_reissue": sum(1 for t in moved if t["changes"] and not t["reissues"]),
+        "tickets_by_holder_changes": {("%d+" % k if k == 4 else str(k)): hist[k] for k in sorted(hist)},
+        "moves_by_actor": dict(by_actor.most_common(10)),
+        "first_move_at": min(firsts) if firsts else None,
+        "last_move_at": max(lasts).isoformat() if lasts else None,
+    }
+
+    holder = (PH_HOLDER or "").lower()
+    who_filter = (PH_BY or "").lower()
+    def keep(t):
+        if t["changes"] < PH_MIN_CHANGES:
+            return False
+        if (since or until) and not t["in_range"]:
+            return False
+        if who_filter and not any(who_filter in a.lower() for a in t["actors"]):
+            return False
+        if PH_NO_REISSUE and (not t["changes"] or t["reissues"]):
+            return False
+        if holder:
+            p = info[t["pk"]]
+            if holder not in ("%s %s" % (p["attendee_name_cached"] or "", p["attendee_email"] or "")).lower():
+                return False
+        return True
+
+    matched = [t for t in moved if keep(t)]
+    if PH_SORT == "most_moves":
+        matched.sort(key=lambda t: (-t["changes"], -(t["last"].timestamp() if t["last"] else 0)))
+    else:
+        matched.sort(key=lambda t: -(t["last"].timestamp() if t["last"] else 0))
+    page = matched[PH_OFFSET:PH_OFFSET + PH_LIMIT]
+
+    order_ids = {info[t["pk"]]["order_id"] for t in page}
+    orders = {o["pk"]: o for o in Order.objects.filter(pk__in=order_ids).values("pk", "code", "email")}
+    first_old = {}
+    for e in LogEntry.objects.filter(content_type=ct, object_id__in=order_ids, action_type="pretix.event.order.contact.changed").order_by("datetime", "pk"):
+        first_old.setdefault(e.object_id, (e.parsed_data or {}).get("old_email"))
+
+    rows = []
+    for t in page:
+        p = info[t["pk"]]
+        o = orders.get(p["order_id"], {})
+        row = {
+            "order_code": o.get("code"),
+            "positionid": p["positionid"],
+            "position_id": p["pk"],
+            "buyer_email_at_purchase": first_old.get(p["order_id"]) or o.get("email"),
+            "current_holder": p["attendee_name_cached"],
+            "current_holder_email": p["attendee_email"],
+            "canceled": p["canceled"],
+            "holder_changes": t["changes"],
+            "qr_generation": t["reissues"] + 1,
+            "last_moved_at": t["last"].isoformat() if t["last"] else None,
+        }
+        if PH_TIMELINE:
+            row["timeline"] = [{"at": m["at"], "what": m["what"], "by": m["by"]} for m in t["moves"]]
+        rows.append(row)
+
+    print("PH_RESULT " + json.dumps({"summary": summary, "matching": len(matched), "tickets": rows}, default=str))
 `;
 
-export async function listTransfers(client: PretixClient, input: { event: string; organizer?: string }) {
+export async function listTransfers(
+  client: PretixClient,
+  input: {
+    event: string;
+    limit?: number;
+    offset?: number;
+    min_changes?: number;
+    since?: string;
+    until?: string;
+    by?: string;
+    holder?: string;
+    order_code?: string;
+    changed_without_reissue?: boolean;
+    sort?: "latest" | "most_moves";
+    include_timeline?: boolean;
+    organizer?: string;
+  },
+) {
   const organizer = client.organizer(input.organizer);
-  const stdout = await runPretixShell(
-    `PH_EVENT = ${JSON.stringify(input.event)}\nPH_ORG = ${JSON.stringify(organizer)}\n${EVENT_LOG_SCRIPT}`,
-  );
+  const limit = input.limit ?? 50;
+  const offset = input.offset ?? 0;
+  const vars = [
+    `PH_EVENT = ${JSON.stringify(input.event)}`,
+    `PH_ORG = ${JSON.stringify(organizer)}`,
+    `PH_SINCE = ${JSON.stringify(input.since ?? "")}`,
+    `PH_UNTIL = ${JSON.stringify(input.until ?? "")}`,
+    `PH_ORDER = ${JSON.stringify(input.order_code ?? "")}`,
+    `PH_BY = ${JSON.stringify(input.by ?? "")}`,
+    `PH_HOLDER = ${JSON.stringify(input.holder ?? "")}`,
+    `PH_MIN_CHANGES = ${input.min_changes ?? 0}`,
+    `PH_NO_REISSUE = ${input.changed_without_reissue ? 1 : 0}`,
+    `PH_SORT = ${JSON.stringify(input.sort ?? "latest")}`,
+    `PH_TIMELINE = ${input.include_timeline ? 1 : 0}`,
+    `PH_LIMIT = ${limit}`,
+    `PH_OFFSET = ${offset}`,
+  ].join("\n");
+  const stdout = await runPretixShell(`${vars}\n${TRANSFERS_SCRIPT}`);
   const line = stdout.split("\n").find((l) => l.startsWith("PH_RESULT "));
   if (!line) throw new Error(`Order log script produced no result. Output: ${stdout.trim().slice(-300)}`);
-  const byOrder = JSON.parse(line.slice("PH_RESULT ".length)) as Record<string, LogRow[]>;
+  const result = JSON.parse(line.slice("PH_RESULT ".length)) as {
+    summary: Record<string, unknown>;
+    matching: number;
+    tickets: Array<Record<string, unknown>>;
+  };
 
-  // Only the orders that have log entries are fetched; loading every order
-  // silently dropped any past the 10,000th on big events.
-  const orderByCode = await getOrdersByCode(client, organizer, input.event, Object.keys(byOrder));
-
-  const tickets: Array<Record<string, unknown>> = [];
-  let attendeeChanges = 0;
-  let reissues = 0;
-  for (const [code, rows] of Object.entries(byOrder)) {
-    const order = orderByCode.get(code);
-    if (!order) continue;
-    const firstEmailChange = rows.find((r) => r.action_type === "pretix.event.order.contact.changed");
-    const buyer = (firstEmailChange?.data?.old_email as string | undefined) ?? order.email;
-    for (const p of order.positions) {
-      const h = buildPositionHistory(p, rows, buyer);
-      const changes = h.history.filter((e) => e.kind === "attendee_changed");
-      const reissued = h.history.filter((e) => e.kind === "qr_reissued");
-      if (changes.length === 0 && reissued.length === 0) continue;
-      attendeeChanges += changes.length;
-      reissues += reissued.length;
-      tickets.push({
-        order_code: code,
-        positionid: p.positionid,
-        position_id: p.id,
-        buyer_email_at_purchase: buyer,
-        current_holder: p.attendee_name,
-        current_holder_email: p.attendee_email ?? null,
-        canceled: p.canceled,
-        attendee_changes: changes.length,
-        qr_generation: h.qr_generation,
-        timeline: [...changes, ...reissued]
-          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-          .map((e) => ({ at: e.timestamp, what: e.description, by: e.actor })),
-      });
-    }
-  }
-
+  const hasMore = offset + result.tickets.length < result.matching;
   return {
     event: input.event,
-    tickets_with_attendee_change: tickets.filter((t) => (t.attendee_changes as number) > 0).length,
-    tickets_with_qr_reissue: tickets.filter((t) => (t.qr_generation as number) > 1).length,
-    total_attendee_changes: attendeeChanges,
-    total_qr_reissues: reissues,
-    note: "pretix logs every attendee edit the same way, so a typo fix looks like a transfer here. Orders whose log was deleted with the order are not included.",
-    tickets,
+    summary: result.summary,
+    matching_filters: result.matching,
+    returned: result.tickets.length,
+    offset,
+    has_more: hasMore,
+    ...(hasMore ? { next_offset: offset + result.tickets.length } : {}),
+    note: "The summary covers the whole event; the list follows your filters. pretix logs every attendee edit the same way, so a typo fix looks like a transfer here. Orders whose log was deleted with the order are not included.",
+    tickets: result.tickets,
   };
 }
 
