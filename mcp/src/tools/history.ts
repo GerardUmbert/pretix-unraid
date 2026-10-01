@@ -133,12 +133,12 @@ function rowPositions(row: LogRow): { pks: number[]; positionids: number[] } {
   return { pks, positionids };
 }
 
-function describeOrderRow(row: LogRow): HistoryEvent | null {
+function describeOrderRow(row: LogRow, buyer: string | null): HistoryEvent | null {
   const d = row.data ?? {};
   const base = { timestamp: row.datetime, actor: row.actor };
   switch (row.action_type) {
     case "pretix.event.order.placed":
-      return { ...base, kind: "order_placed", description: "Order placed" };
+      return { ...base, kind: "order_placed", description: `Order placed${buyer ? ` by ${buyer}` : ""}` };
     case "pretix.event.order.paid":
       return { ...base, kind: "order_paid", description: "Order marked paid" };
     case "pretix.event.order.payment.confirmed":
@@ -162,12 +162,15 @@ function describeOrderRow(row: LogRow): HistoryEvent | null {
   }
 }
 
-function fmtAttendee(a: { name?: string | null; email?: string | null } | undefined): string {
-  if (!a) return "original holder (not logged by pretix)";
+function fmtAttendee(
+  a: { name?: string | null; email?: string | null } | undefined,
+  buyer: string | null,
+): string {
+  if (!a) return `original holder (name at purchase not logged by pretix; order buyer${buyer ? ` ${buyer}` : ""})`;
   return `${a.name ?? "no name"}${a.email ? ` <${a.email}>` : ""}`;
 }
 
-function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[]) {
+function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[], buyer: string | null) {
   const events: HistoryEvent[] = [];
   let generation = 1;
   // Attendee before the first logged change is unknown (pretix logs only the new
@@ -181,7 +184,7 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[]) {
       (refs.pks.length === 0 && refs.positionids.includes(position.positionid));
 
     if (!mine) {
-      const orderLevel = describeOrderRow(row);
+      const orderLevel = describeOrderRow(row, buyer);
       if (orderLevel) events.push(orderLevel);
       continue;
     }
@@ -196,7 +199,7 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[]) {
         events.push({
           ...base,
           kind: "attendee_changed",
-          description: `Attendee changed from ${fmtAttendee(current)} to ${fmtAttendee(next)}`,
+          description: `Attendee changed from ${fmtAttendee(current, buyer)} to ${fmtAttendee(next, buyer)}`,
         });
         current = next;
       }
@@ -283,6 +286,11 @@ export async function getTicketHistory(
   const order = await client.get<PretixOrder>(`${base}/orders/${orderCode}/`);
   const rows = await fetchLog(order.code, event);
 
+  // pretix logs old_email on every contact change, so the purchase-time buyer
+  // email is the old_email of the first change, else the current one.
+  const firstEmailChange = rows.find((r) => r.action_type === "pretix.event.order.contact.changed");
+  const buyer: string | null = firstEmailChange?.data?.old_email ?? order.email;
+
   let positions = order.positions;
   if (positionid !== undefined) {
     positions = positions.filter((p) => p.positionid === positionid);
@@ -298,6 +306,7 @@ export async function getTicketHistory(
     status: order.status,
     email: order.email,
     note: "Ticket ids never change when a QR is regenerated or the ticket is transferred: the same order + positionid is the same ticket across all QR generations. pretix does not log the secrets themselves, so only the current secret is shown.",
-    tickets: positions.map((p) => buildPositionHistory(p, rows)),
+    buyer_email_at_purchase: buyer,
+    tickets: positions.map((p) => buildPositionHistory(p, rows, buyer)),
   };
 }
