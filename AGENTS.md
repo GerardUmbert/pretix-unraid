@@ -72,8 +72,20 @@ setup:
   its data into Postgres (`pretix-db-copy.py`) and renames the file to
   `db.sqlite3.migrated`; `PRETIX_INTERNAL_POSTGRES=false` falls back to
   SQLite.
-- No Redis/Celery broker (pretix falls back to running tasks inline when
-  `[celery]`/`[redis]` sections are absent from `pretix.cfg`).
+- A Redis runs *inside* the same container too (unix socket
+  `/run/pretix-redis/redis.sock`, no persistence), started by
+  `docker-entrypoint-plugins.sh` like Postgres. It is cache, session store
+  and Celery broker. The user asked for this (to stress-test imports of
+  ~30k tickets on the NAS; a UI import otherwise runs inside the web
+  request). A Celery task worker (`pretix-task.sh`, concurrency
+  `PRETIX_CELERY_CONCURRENCY`, default 4) and the periodic-job runner
+  (`pretix-cron.sh`, every 15 min, so order expiry works) run under
+  supervisord (`supervisord-tasks.conf`). `PRETIX_INTERNAL_REDIS=false`
+  restores the old behaviour: no Redis, no worker, tasks run inline. The
+  entrypoint exports the `PRETIX_REDIS_*`/`PRETIX_CELERY_*` env vars, so
+  processes started with `docker exec` (e.g. `pretix shell`, the stdio MCP)
+  do not have them and run tasks inline unless you pass them yourself.
+  Postgres memory is tunable via `PRETIX_PG_*` template variables.
 - No backup/upgrade story. To "reset," delete the appdata folder (or
   use the `pretix-reset` skill).
 
@@ -157,12 +169,11 @@ Facts about the base image (verified by running it, not assumed):
 - Base OS: Debian 13 (trixie).
 - Entrypoint: `/usr/local/bin/pretix` (a bash wrapper), invoked as
   `pretix web` to run migrations then start nginx + gunicorn via
-  supervisord. Runs as `pretixuser`. We use `web`, not `all`: `all` also
-  starts a Celery task worker, which with no broker configured just
-  retries a connection to RabbitMQ on 127.0.0.1:5672 forever (log spam,
-  no function - tasks run inline in the web process). Neither mode runs
-  the periodic-task cron (`pretix cron`), so scheduled jobs such as
-  order expiry don't run in this test setup.
+  supervisord. Runs as `pretixuser`. We use `web`, not `all`, and add our
+  own supervisord programs for the task worker and cron (see the Redis
+  note above): `all`'s stock worker has no broker unless Redis is set up
+  and would retry RabbitMQ on 127.0.0.1:5672 forever. Neither stock mode
+  runs the periodic-task cron (`pretix cron`); `pretix-cron.sh` does.
 - Config file search order: `/etc/pretix/pretix.cfg`,
   `~/.pretix.cfg`, `./pretix.cfg` (see `pretix/settings.py`).
 - Upstream nginx listens on port 80; our Dockerfile rewrites it to 8345 so the container port matches the template's host port (Unraid's Tailscale Serve/Funnel hook proxies to the host-mapped port number from inside the container, so 8345->80 broke Funnel).
@@ -171,10 +182,9 @@ Facts about the base image (verified by running it, not assumed):
 
 - `[database]` mirrors the image's env defaults (internal Postgres over a
   unix socket); the env vars win anyway.
-- No `[redis]` / `[celery]` section — this is intentional, not an
-  oversight. Do not add one without also adding a Redis service, and do
-  not add one at all unless the user asks for it, since it changes the
-  scope of this repo (see above).
+- No `[redis]` / `[celery]` section in the file — the internal Redis is
+  configured through env vars exported by the entrypoint instead (see
+  above). Do not add those sections to the file.
 - Never fill this file with real secrets/production URLs and commit
   them — it's meant to be a generic test config. If a user wants a
   production-like config, that belongs in their own untracked copy, not

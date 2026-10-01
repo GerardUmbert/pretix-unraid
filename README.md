@@ -6,11 +6,13 @@ Community Applications template for pretix, so this is a manually
 installed template XML.
 
 This builds on top of pretix's own official `pretix/standalone:stable`
-image, with a Postgres 17 running inside the same container (unix socket only) and no Redis/Celery
-broker (pretix falls back to running background tasks inline when no
-`[celery]`/`[redis]` section is present). No extra containers, no ports
-beyond the web UI are exposed, and the bundled Postgres opens no network
-port, so nothing here touches other services already running on the NAS.
+image, with a Postgres 17 and a Redis running inside the same container
+(unix sockets only), plus a Celery task worker and pretix's periodic-job
+runner so imports, exports and emails run in the background. Set
+`PRETIX_INTERNAL_REDIS=false` to drop Redis/Celery again (pretix then runs
+tasks inline in the web request). No extra containers, no ports beyond the
+web UI are exposed, and neither bundled service opens a network port, so
+nothing here touches other services already running on the NAS.
 
 On top of the stock image, this repo adds a thin `Dockerfile` +
 `docker-entrypoint-plugins.sh` that can install extra pretix plugins

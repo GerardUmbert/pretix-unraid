@@ -28,6 +28,14 @@ FROM pretix/standalone:stable
 # "database is locked" once several workers wrote at the same time. Set
 # PRETIX_INTERNAL_POSTGRES=false to fall back to the old SQLite file
 # (/data/db.sqlite3). NUM_WORKERS caps the base image's 2 x CPU cores default.
+#
+# Redis + Celery: a Redis installed below also runs inside this container
+# (unix socket only, no persistence) and serves as cache, session store and
+# Celery broker. A Celery task worker and the periodic-task runner
+# (order expiry etc.) run under supervisord, so slow jobs such as big order
+# imports run in the background instead of inside the web request. Set
+# PRETIX_INTERNAL_REDIS=false to go back to running tasks inline with no
+# Redis (see docker-entrypoint-plugins.sh for the env vars it exports).
 ENV PRETIX_PRETIX_DATADIR=/data \
     PRETIX_PRETIX_INSTANCE_NAME=pretix-test \
     PRETIX_DATABASE_BACKEND=postgresql \
@@ -40,9 +48,10 @@ USER root
 RUN mkdir -p /etc/postgresql-common \
  && echo 'create_main_cluster = false' > /etc/postgresql-common/createcluster.conf \
  && apt-get update \
- && apt-get install -y --no-install-recommends postgresql \
+ && apt-get install -y --no-install-recommends postgresql redis-server \
  && rm -rf /var/lib/apt/lists/* \
- && test -x /usr/lib/postgresql/17/bin/initdb
+ && test -x /usr/lib/postgresql/17/bin/initdb \
+ && test -x /usr/bin/redis-server
 COPY docker-entrypoint-plugins.sh /usr/local/bin/docker-entrypoint-plugins.sh
 COPY pretix-db-copy.py /usr/local/bin/pretix-db-copy.py
 RUN chmod +x /usr/local/bin/docker-entrypoint-plugins.sh
@@ -57,15 +66,19 @@ COPY --from=mcp-build /mcp/dist /opt/pretix-mcp/dist
 COPY --from=mcp-build /mcp/node_modules /opt/pretix-mcp/node_modules
 COPY mcp/package.json /opt/pretix-mcp/package.json
 COPY pretix-mcp-http.sh /usr/local/bin/pretix-mcp-http.sh
+COPY pretix-task.sh /usr/local/bin/pretix-task.sh
+COPY pretix-cron.sh /usr/local/bin/pretix-cron.sh
 COPY supervisord-mcp.conf /etc/supervisord/pretixmcp.conf
+COPY supervisord-tasks.conf /etc/supervisord/pretixtasks.conf
 COPY nginx-mcp-location.conf /tmp/nginx-mcp-location.conf
-RUN chmod +x /usr/local/bin/pretix-mcp-http.sh \
- && sed -i 's#pretixweb.conf#pretixweb.conf /etc/supervisord/pretixmcp.conf#' /etc/supervisord.web.conf \
+RUN chmod +x /usr/local/bin/pretix-mcp-http.sh /usr/local/bin/pretix-task.sh /usr/local/bin/pretix-cron.sh \
+ && sed -i 's#pretixweb.conf#pretixweb.conf /etc/supervisord/pretixmcp.conf /etc/supervisord/pretixtasks.conf#' /etc/supervisord.web.conf \
  && awk '/^        location \/ \{/ && !done { while ((getline line < "/tmp/nginx-mcp-location.conf") > 0) print line; done=1 } { print }' /etc/nginx/nginx.conf > /tmp/nginx.conf.new \
  && mv /tmp/nginx.conf.new /etc/nginx/nginx.conf \
  && rm /tmp/nginx-mcp-location.conf \
  && grep -q 'location = /mcp' /etc/nginx/nginx.conf \
- && grep -q pretixmcp.conf /etc/supervisord.web.conf
+ && grep -q pretixmcp.conf /etc/supervisord.web.conf \
+ && grep -q pretixtasks.conf /etc/supervisord.web.conf
 
 # nginx listens on 8345 instead of 80 so the container port equals the host
 # port in the Unraid template. Unraid's Tailscale Serve/Funnel hook proxies

@@ -11,6 +11,10 @@ on:
       - mcp/**
       - pretix-mcp-http.sh
       - supervisord-mcp.conf
+      - supervisord-tasks.conf
+      - pretix-task.sh
+      - pretix-cron.sh
+      - pretix-db-copy.py
       - nginx-mcp-location.conf
       - .github/workflows/build-image.yml
   workflow_dispatch: {}

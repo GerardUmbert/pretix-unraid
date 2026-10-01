@@ -102,6 +102,45 @@ else
   unset PRETIX_DATABASE_BACKEND PRETIX_DATABASE_NAME PRETIX_DATABASE_USER PRETIX_DATABASE_HOST
 fi
 
+# Internal Redis (see Dockerfile): cache, sessions and Celery broker for the
+# task worker that supervisord runs. Unix socket only (nothing listens on the
+# network) and no persistence - losing queued jobs on a restart is fine for a
+# test instance. pretix picks it all up from PRETIX_<SECTION>_<KEY> env vars,
+# which are exported here so supervisord's child processes inherit them.
+redis_running=false
+redis_sock=/run/pretix-redis/redis.sock
+
+redis_stop() {
+  if [ "$redis_running" = true ]; then
+    as_pretix /usr/bin/redis-cli -s "$redis_sock" shutdown nosave || true
+    redis_running=false
+  fi
+}
+
+if [ "${PRETIX_INTERNAL_REDIS:-true}" = "true" ]; then
+  mkdir -p /run/pretix-redis
+  chown pretixuser /run/pretix-redis
+  echo "[redis] Starting..."
+  as_pretix /usr/bin/redis-server --port 0 --unixsocket "$redis_sock" --unixsocketperm 700     --save "" --appendonly no --dir /run/pretix-redis --daemonize yes     --logfile /run/pretix-redis/redis.log >/dev/null
+  for _ in $(seq 1 50); do
+    as_pretix /usr/bin/redis-cli -s "$redis_sock" ping >/dev/null 2>&1 && break
+    sleep 0.2
+  done
+  if ! as_pretix /usr/bin/redis-cli -s "$redis_sock" ping >/dev/null 2>&1; then
+    echo "[redis] ERROR: did not start. Set PRETIX_INTERNAL_REDIS=false to run without it." >&2
+    cat /run/pretix-redis/redis.log >&2 || true
+    pg_stop
+    exit 1
+  fi
+  redis_running=true
+  export PRETIX_REDIS_LOCATION="unix://$redis_sock?db=0"
+  export PRETIX_REDIS_SESSIONS=true
+  export PRETIX_CELERY_BROKER="redis+socket://$redis_sock?virtual_host=1"
+  export PRETIX_CELERY_BACKEND="redis+socket://$redis_sock?virtual_host=2"
+else
+  echo "[redis] PRETIX_INTERNAL_REDIS=false: no Redis/Celery, tasks run inline in the web process"
+fi
+
 if [ -n "${PRETIX_PLUGINS:-}" ]; then
   IFS=',' read -ra plugins <<< "$PRETIX_PLUGINS"
   for plugin in "${plugins[@]}"; do
@@ -124,13 +163,13 @@ if [ -n "${PRETIX_PLUGINS:-}" ]; then
     python3 -m pretix updateassets
 fi
 
-if [ "$pg_running" != true ]; then
+if [ "$pg_running" != true ] && [ "$redis_running" != true ]; then
   exec setpriv --reuid=pretixuser --regid=pretixuser --clear-groups \
     /usr/local/bin/pretix "$@"
 fi
 
 # Postgres needs a clean shutdown, so stay around as the parent: forward
-# stop signals to pretix and stop Postgres once it has exited.
+# stop signals to pretix and stop Redis and Postgres once it has exited.
 as_pretix /usr/local/bin/pretix "$@" &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null || true' TERM INT
@@ -141,5 +180,6 @@ while :; do
   kill -0 "$child" 2>/dev/null || break
 done
 trap - TERM INT
+redis_stop
 pg_stop
 exit "$status"
