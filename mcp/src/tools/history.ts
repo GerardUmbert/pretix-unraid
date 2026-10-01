@@ -13,12 +13,19 @@ export const ticketHistoryInputSchema = {
   order_code: z
     .string()
     .optional()
-    .describe("The pretix order code, e.g. 'ABC12'. Required unless secret is given instead."),
+    .describe("The pretix order code, e.g. 'ABC12'. Required unless position_id or secret is given instead."),
   secret: z
     .string()
     .optional()
     .describe(
       "The ticket's CURRENT QR secret, used to find the order when the code is unknown. Old (replaced) secrets cannot be looked up: pretix does not log them.",
+    ),
+  position_id: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "The ticket's internal id (the position_id field returned by pretix_get_ticket_status, pretix_get_ticket_history and the check-in tools). Finds the order for you, and limits the history to that ticket.",
     ),
   positionid: z
     .number()
@@ -240,16 +247,22 @@ function buildPositionHistory(position: PretixOrderPosition, rows: LogRow[]) {
 
 export async function getTicketHistory(
   client: PretixClient,
-  input: { order_code?: string; secret?: string; positionid?: number; organizer?: string; event?: string },
+  input: { order_code?: string; secret?: string; position_id?: number; positionid?: number; organizer?: string; event?: string },
 ) {
   const organizer = client.organizer(input.organizer);
   const event = client.event(input.event);
   const base = `/organizers/${organizer}/events/${event}`;
 
   let orderCode = input.order_code;
+  let positionid = input.positionid;
+  if (!orderCode && input.position_id !== undefined) {
+    const pos = await client.get<PretixOrderPosition>(`${base}/orderpositions/${input.position_id}/`);
+    orderCode = pos.order;
+    positionid = pos.positionid;
+  }
   if (!orderCode) {
-    if (!input.secret) throw new Error("Provide order_code or secret.");
-    const found = await client.get<{ results: Array<{ order: string }> }>(
+    if (!input.secret) throw new Error("Provide order_code, position_id or secret.");
+    const found = await client.get<{ results: Array<{ order: string; positionid: number }> }>(
       `${base}/orderpositions/?secret=${encodeURIComponent(input.secret)}`,
     );
     if (found.results.length === 0) {
@@ -258,17 +271,18 @@ export async function getTicketHistory(
       );
     }
     orderCode = found.results[0].order;
+    positionid = found.results[0].positionid;
   }
 
   const order = await client.get<PretixOrder>(`${base}/orders/${orderCode}/`);
   const rows = await fetchLog(order.code, event);
 
   let positions = order.positions;
-  if (input.positionid !== undefined) {
-    positions = positions.filter((p) => p.positionid === input.positionid);
+  if (positionid !== undefined) {
+    positions = positions.filter((p) => p.positionid === positionid);
     if (positions.length === 0) {
       throw new Error(
-        `Order ${order.code} has no position ${input.positionid}. Positions: ${order.positions.map((p) => p.positionid).join(", ")}`,
+        `Order ${order.code} has no position ${positionid}. Positions: ${order.positions.map((p) => p.positionid).join(", ")}`,
       );
     }
   }
